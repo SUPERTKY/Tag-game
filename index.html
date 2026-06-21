@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>2D フィールド移動</title>
+  <title>Tag Game - パスワード保護</title>
   <style>
     body {
       margin: 0;
@@ -275,13 +275,14 @@
 
     function drawUI() {
       ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-      ctx.fillRect(12, 12, 300, 76);
+      ctx.fillRect(12, 12, 360, 98);
 
       ctx.fillStyle = "white";
       ctx.font = "16px sans-serif";
       ctx.fillText("矢印キー / WASD で移動", 24, 35);
       ctx.fillText(`座標: ${Math.round(player.x)}, ${Math.round(player.y)}`, 24, 57);
       ctx.fillText("家は4コマ分の障害物", 24, 79);
+      ctx.fillText("Cloudflare Pagesで36人向けに保護公開", 24, 101);
     }
 
     function loop(now) {
