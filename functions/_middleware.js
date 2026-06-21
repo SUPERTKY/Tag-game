@@ -1,4 +1,5 @@
 const AUTH_REALM = "Tag Game";
+const DEFAULT_USERNAME = "player";
 const HASH_ALGORITHM = "SHA-256";
 const PBKDF2_ITERATIONS = 210000;
 const PBKDF2_KEY_LENGTH_BITS = 256;
@@ -19,7 +20,9 @@ export async function onRequest(context) {
   const authHeader = context.request.headers.get("Authorization") || "";
   const credentials = parseBasicAuth(authHeader);
 
-  if (!credentials || credentials.username !== context.env.TAG_GAME_USERNAME) {
+  const configuredUsername = getConfiguredUsername(context.env);
+
+  if (!credentials || credentials.username !== configuredUsername) {
     return unauthorized();
   }
 
@@ -42,13 +45,6 @@ export async function onRequest(context) {
 }
 
 function validateAuthConfig(env) {
-  if (!env.TAG_GAME_USERNAME) {
-    return new Response("Authentication username is not configured.", {
-      status: 500,
-      headers: securityHeaders,
-    });
-  }
-
   if (env.TAG_GAME_PASSWORD) return null;
 
   if (!env.TAG_GAME_PASSWORD_HASH) {
@@ -67,6 +63,10 @@ function validateAuthConfig(env) {
   }
 
   return null;
+}
+
+function getConfiguredUsername(env) {
+  return env.TAG_GAME_USERNAME || DEFAULT_USERNAME;
 }
 
 function parseBasicAuth(authHeader) {

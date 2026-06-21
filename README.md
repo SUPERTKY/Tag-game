@@ -11,10 +11,41 @@ Cloudflare Pages に公開できる、パスワード保護付きの静的 2D �
    - Build command: 空欄
    - Build output directory: `/`
 4. **Settings** → **Environment variables** に次の値を登録します。
-   - `TAG_GAME_USERNAME`: 入室用ユーザー名
    - `TAG_GAME_PASSWORD`: Cloudflare で作った入室用パスワード（Secret として登録推奨）
+   - `TAG_GAME_USERNAME`: 入室用ユーザー名（省略した場合は `player`）
    - より安全にハッシュで運用したい場合は、`TAG_GAME_PASSWORD` の代わりに `TAG_GAME_PASSWORD_HASH` を登録します。
 5. Deploy を実行します。
+
+
+## Cloudflare に登録する変数名
+
+このサイトを開くと、ブラウザがユーザー名とパスワードを聞いてきます。Cloudflare には次の 2 つを登録してください。
+
+| 変数名 | Type | 入れる値の例 | 説明 |
+| --- | --- | --- | --- |
+| `TAG_GAME_PASSWORD` | Secret | `自分で作ったパスワード` | サイトに入るときのパスワードです。Cloudflare で作ったパスワードをここに入れてください。 |
+| `TAG_GAME_USERNAME` | Text | `player` | 省略できます。省略した場合、ユーザー名は `player` になります。 |
+
+### Cloudflare Dashboard での追加手順
+
+1. Cloudflare Dashboard を開きます。
+2. **Workers & Pages** を開きます。
+3. このサイトの Pages プロジェクト（例: `tag-game`）を選びます。
+4. **Settings** を開きます。
+5. **Variables and Secrets** を開きます。
+6. **Add** または **Add variable** を押します。
+7. まずパスワード用の変数を次のように追加します。
+   - Type: `Secret`
+   - Variable name: `TAG_GAME_PASSWORD`
+   - Value: Cloudflare で作ったパスワード
+8. ユーザー名を変えたい場合だけ、次の変数も追加します。追加しない場合のユーザー名は `player` です。
+   - Type: `Text`
+   - Variable name: `TAG_GAME_USERNAME`
+   - Value: `player` など、ログインに使いたいユーザー名
+9. **Deploy** を押して反映します。
+10. 反映後、サイトにアクセスして、ユーザー名 `player`（変更した場合はその値）と手順 7 のパスワードでログインします。
+
+> `Authentication username is not configured.` が出た場合でも、最新版では `TAG_GAME_USERNAME` を追加しなくてもユーザー名 `player` で入れるようにしています。パスワードは必ず `TAG_GAME_PASSWORD` に入れてください。`TAG_GAME_PASSWORD_HASH` は上級者向けの代替方法なので、まずは使わなくて大丈夫です。
 
 ## 安全なパスワードハッシュの作り方
 
@@ -41,6 +72,10 @@ python3 -m http.server 8000
 ```
 
 Cloudflare Pages Functions のパスワード保護まで確認する場合:
+
+1. `.dev.vars.example` をコピーして `.dev.vars` を作ります。
+2. `.dev.vars` の `TAG_GAME_USERNAME` と `TAG_GAME_PASSWORD` を好きな値に書き換えます。
+3. 次のコマンドを実行します。
 
 ```bash
 npx wrangler pages dev .
