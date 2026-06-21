@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>2D フィールド移動</title>
+  <style>
+    body {
+      margin: 0;
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+      background: #1b1b1b;
+    }
+
+    canvas {
+      width: min(100vw, 960px);
+      height: auto;
+      image-rendering: pixelated;
+      border: 2px solid #eee;
+      background: #69b64a;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="960" height="540"></canvas>
+
+  <script>
+    const canvas = document.querySelector("#game");
+    const ctx = canvas.getContext("2d");
+
+    // ファイル名は手元の画像に合わせて変更してください
+    const sprites = {
+      idle: new Image(),
+      run1: new Image(),
+      run2: new Image(),
+    };
+
+    sprites.idle.src = "idle.png";
+    sprites.run1.src = "run1.png";
+    sprites.run2.src = "run2.png";
+
+    // ワールドの広さ。canvasより大きくして、カメラ追従を作る
+    const world = {
+      width: 5000,
+      height: 3500,
+    };
+
+    const player = {
+      x: world.width / 2,
+      y: world.height / 2,
+      width: 48,
+      height: 48,
+      speed: 280, // 1秒あたりの移動量
+      facing: 1,  // 1: 右向き / -1: 左向き
+    };
+
+    const keys = {};
+    window.addEventListener("keydown", (event) => {
+      keys[event.key.toLowerCase()] = true;
+      event.preventDefault();
+    });
+
+    window.addEventListener("keyup", (event) => {
+      keys[event.key.toLowerCase()] = false;
+      event.preventDefault();
+    });
+
+    let running = false;
+    let animationTime = 0;
+    let previousTime = performance.now();
+
+    function update(delta) {
+      let dx = 0;
+      let dy = 0;
+
+      if (keys["arrowleft"] || keys["a"]) dx -= 1;
+      if (keys["arrowright"] || keys["d"]) dx += 1;
+      if (keys["arrowup"] || keys["w"]) dy -= 1;
+      if (keys["arrowdown"] || keys["s"]) dy += 1;
+
+      running = dx !== 0 || dy !== 0;
+
+      // 斜め移動が速くなりすぎないよう調整
+      if (running) {
+        const length = Math.hypot(dx, dy);
+        dx /= length;
+        dy /= length;
+
+        player.x += dx * player.speed * delta;
+        player.y += dy * player.speed * delta;
+
+        if (dx !== 0) player.facing = dx > 0 ? 1 : -1;
+
+        animationTime += delta;
+      } else {
+        animationTime = 0;
+      }
+
+      // フィールド外に出ないようにする
+      player.x = Math.max(0, Math.min(world.width - player.width, player.x));
+      player.y = Math.max(0, Math.min(world.height - player.height, player.y));
+    }
+
+    function getCamera() {
+      let x = player.x + player.width / 2 - canvas.width / 2;
+      let y = player.y + player.height / 2 - canvas.height / 2;
+
+      x = Math.max(0, Math.min(world.width - canvas.width, x));
+      y = Math.max(0, Math.min(world.height - canvas.height, y));
+
+      return { x, y };
+    }
+
+    function drawWorld(camera) {
+      // 見やすいように地面のグリッドを描画
+      ctx.fillStyle = "#69b64a";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const grid = 64;
+      const startX = Math.floor(camera.x / grid) * grid;
+      const startY = Math.floor(camera.y / grid) * grid;
+
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.12)";
+      ctx.lineWidth = 1;
+
+      for (let x = startX; x < camera.x + canvas.width + grid; x += grid) {
+        ctx.beginPath();
+        ctx.moveTo(x - camera.x, 0);
+        ctx.lineTo(x - camera.x, canvas.height);
+        ctx.stroke();
+      }
+
+      for (let y = startY; y < camera.y + canvas.height + grid; y += grid) {
+        ctx.beginPath();
+        ctx.moveTo(0, y - camera.y);
+        ctx.lineTo(canvas.width, y - camera.y);
+        ctx.stroke();
+      }
+
+      // ワールド端を確認しやすい枠
+      ctx.strokeStyle = "#355f28";
+      ctx.lineWidth = 6;
+      ctx.strokeRect(-camera.x, -camera.y, world.width, world.height);
+    }
+
+    function drawPlayer(camera) {
+      let image = sprites.idle;
+
+      if (running) {
+        // 0.15秒ごとに2フレームを切り替える
+        const frame = Math.floor(animationTime / 0.15) % 2;
+        image = frame === 0 ? sprites.run1 : sprites.run2;
+      }
+
+      const screenX = player.x - camera.x;
+      const screenY = player.y - camera.y;
+
+      ctx.save();
+
+      if (player.facing === -1) {
+        ctx.translate(screenX + player.width, screenY);
+        ctx.scale(-1, 1);
+        ctx.drawImage(image, 0, 0, player.width, player.height);
+      } else {
+        ctx.drawImage(image, screenX, screenY, player.width, player.height);
+      }
+
+      ctx.restore();
+    }
+
+    function drawUI() {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+      ctx.fillRect(12, 12, 255, 54);
+
+      ctx.fillStyle = "white";
+      ctx.font = "16px sans-serif";
+      ctx.fillText("矢印キー / WASD で移動", 24, 35);
+      ctx.fillText(`座標: ${Math.round(player.x)}, ${Math.round(player.y)}`, 24, 57);
+    }
+
+    function loop(now) {
+      const delta = Math.min((now - previousTime) / 1000, 0.05);
+      previousTime = now;
+
+      update(delta);
+
+      const camera = getCamera();
+      drawWorld(camera);
+      drawPlayer(camera);
+      drawUI();
+
+      requestAnimationFrame(loop);
+    }
+
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
