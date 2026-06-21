@@ -34,17 +34,33 @@
       idle: new Image(),
       run1: new Image(),
       run2: new Image(),
+      ground: new Image(),
+      house: new Image(),
     };
 
-sprites.idle.src = "character/boy/standing_boy.png";
-sprites.run1.src = "character/boy/running_boy_1.png";
-sprites.run2.src = "character/boy/running_boy_2.png";
+    sprites.idle.src = "character/boy/standing_boy.png";
+    sprites.run1.src = "character/boy/running_boy_1.png";
+    sprites.run2.src = "character/boy/running_boy_2.png";
+    sprites.ground.src = "Ground.png";
+    sprites.house.src = "Obstacle/house.png";
 
     // ワールドの広さ。canvasより大きくして、カメラ追従を作る
     const world = {
       width: 5000,
       height: 3500,
     };
+
+    const tileSize = 64;
+
+    const obstacles = [
+      {
+        x: world.width / 2 + tileSize * 3,
+        y: world.height / 2 - tileSize * 2,
+        width: tileSize * 4,
+        height: tileSize * 4,
+        image: sprites.house,
+      },
+    ];
 
     const player = {
       x: world.width / 2,
@@ -118,8 +134,7 @@ sprites.run2.src = "character/boy/running_boy_2.png";
         dx /= length;
         dy /= length;
 
-        player.x += dx * player.speed * delta;
-        player.y += dy * player.speed * delta;
+        movePlayer(dx * player.speed * delta, dy * player.speed * delta);
 
         if (dx !== 0) {
           player.facing = dx > 0 ? 1 : -1;
@@ -135,8 +150,44 @@ sprites.run2.src = "character/boy/running_boy_2.png";
       }
 
       // フィールド外に出ないようにする
+      clampPlayerToWorld();
+    }
+
+    function rectanglesOverlap(a, b) {
+      return (
+        a.x < b.x + b.width &&
+        a.x + a.width > b.x &&
+        a.y < b.y + b.height &&
+        a.y + a.height > b.y
+      );
+    }
+
+    function collidesWithObstacle(x, y) {
+      const nextPlayerArea = {
+        x,
+        y,
+        width: player.width,
+        height: player.height,
+      };
+
+      return obstacles.some((obstacle) => rectanglesOverlap(nextPlayerArea, obstacle));
+    }
+
+    function clampPlayerToWorld() {
       player.x = Math.max(0, Math.min(world.width - player.width, player.x));
       player.y = Math.max(0, Math.min(world.height - player.height, player.y));
+    }
+
+    function movePlayer(deltaX, deltaY) {
+      const nextX = Math.max(0, Math.min(world.width - player.width, player.x + deltaX));
+      if (!collidesWithObstacle(nextX, player.y)) {
+        player.x = nextX;
+      }
+
+      const nextY = Math.max(0, Math.min(world.height - player.height, player.y + deltaY));
+      if (!collidesWithObstacle(player.x, nextY)) {
+        player.y = nextY;
+      }
     }
 
     function getCamera() {
@@ -150,35 +201,48 @@ sprites.run2.src = "character/boy/running_boy_2.png";
     }
 
     function drawWorld(camera) {
-      // 見やすいように地面のグリッドを描画
-      ctx.fillStyle = "#69b64a";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      const grid = 64;
-      const startX = Math.floor(camera.x / grid) * grid;
-      const startY = Math.floor(camera.y / grid) * grid;
-
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.12)";
-      ctx.lineWidth = 1;
-
-      for (let x = startX; x < camera.x + canvas.width + grid; x += grid) {
-        ctx.beginPath();
-        ctx.moveTo(x - camera.x, 0);
-        ctx.lineTo(x - camera.x, canvas.height);
-        ctx.stroke();
-      }
-
-      for (let y = startY; y < camera.y + canvas.height + grid; y += grid) {
-        ctx.beginPath();
-        ctx.moveTo(0, y - camera.y);
-        ctx.lineTo(canvas.width, y - camera.y);
-        ctx.stroke();
-      }
+      drawGround(camera);
+      drawObstacles(camera);
 
       // ワールド端を確認しやすい枠
       ctx.strokeStyle = "#355f28";
       ctx.lineWidth = 6;
       ctx.strokeRect(-camera.x, -camera.y, world.width, world.height);
+    }
+
+    function drawGround(camera) {
+      if (!sprites.ground.complete || sprites.ground.naturalWidth === 0) {
+        ctx.fillStyle = "#69b64a";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        return;
+      }
+
+      const pattern = ctx.createPattern(sprites.ground, "repeat");
+
+      ctx.save();
+      ctx.translate(-(camera.x % sprites.ground.width), -(camera.y % sprites.ground.height));
+      ctx.fillStyle = pattern;
+      ctx.fillRect(
+        0,
+        0,
+        canvas.width + sprites.ground.width,
+        canvas.height + sprites.ground.height,
+      );
+      ctx.restore();
+    }
+
+    function drawObstacles(camera) {
+      for (const obstacle of obstacles) {
+        if (!obstacle.image.complete || obstacle.image.naturalWidth === 0) continue;
+
+        ctx.drawImage(
+          obstacle.image,
+          obstacle.x - camera.x,
+          obstacle.y - camera.y,
+          obstacle.width,
+          obstacle.height,
+        );
+      }
     }
 
     function drawPlayer(camera) {
@@ -211,12 +275,13 @@ sprites.run2.src = "character/boy/running_boy_2.png";
 
     function drawUI() {
       ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-      ctx.fillRect(12, 12, 255, 54);
+      ctx.fillRect(12, 12, 300, 76);
 
       ctx.fillStyle = "white";
       ctx.font = "16px sans-serif";
       ctx.fillText("矢印キー / WASD で移動", 24, 35);
       ctx.fillText(`座標: ${Math.round(player.x)}, ${Math.round(player.y)}`, 24, 57);
+      ctx.fillText("家は4コマ分の障害物", 24, 79);
     }
 
     function loop(now) {
