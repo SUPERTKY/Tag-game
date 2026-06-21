@@ -158,7 +158,10 @@ sprites.run2.src = "character/boy/running_boy_2.png";
 
       ctx.save();
 
-      if (player.facing === -1) {
+      // 走り画像は元画像の向きが待機画像と逆なので、走っている間だけ反転条件を逆にする
+      const drawFacing = running ? player.facing * -1 : player.facing;
+
+      if (drawFacing === -1) {
         ctx.translate(screenX + player.width, screenY);
         ctx.scale(-1, 1);
         ctx.drawImage(image, 0, 0, player.width, player.height);
