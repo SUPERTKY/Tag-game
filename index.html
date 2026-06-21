@@ -13,7 +13,30 @@
       background: #1b1b1b;
     }
 
+    #wait-screen {
+      position: relative;
+      width: min(100vw, 960px);
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      background-image: url("image/Wait.png");
+      background-position: center;
+      background-size: cover;
+      background-repeat: no-repeat;
+    }
+
+    #matching-button {
+      position: absolute;
+      left: 50%;
+      top: 62%;
+      transform: translate(-50%, -50%);
+      width: min(34vw, 300px);
+      height: auto;
+      user-select: none;
+      pointer-events: none;
+    }
+
     canvas {
+      display: none;
       width: min(100vw, 960px);
       height: auto;
       image-rendering: pixelated;
@@ -23,6 +46,9 @@
   </style>
 </head>
 <body>
+  <div id="wait-screen" aria-label="待機画面">
+    <img id="matching-button" src="image/Matching_Button.png" alt="マッチング開始" />
+  </div>
   <canvas id="game" width="960" height="540"></canvas>
 
   <script>
