@@ -53,17 +53,48 @@ sprites.run2.src = "character/boy/running_boy_2.png";
       height: 48,
       speed: 280, // 1秒あたりの移動量
       facing: 1,  // 1: 右向き / -1: 左向き
+      idleFacing: 1, // 最後に走った見た目の向き
     };
 
+    const movementKeys = new Set([
+      "arrowleft",
+      "arrowright",
+      "arrowup",
+      "arrowdown",
+      "a",
+      "d",
+      "w",
+      "s",
+    ]);
     const keys = {};
-    window.addEventListener("keydown", (event) => {
-      keys[event.key.toLowerCase()] = true;
+
+    function resetMovementInput() {
+      for (const key of movementKeys) {
+        keys[key] = false;
+      }
+    }
+
+    function handleMovementKey(event, isPressed) {
+      const key = event.key.toLowerCase();
+
+      if (!movementKeys.has(key)) return;
+
+      keys[key] = isPressed;
       event.preventDefault();
+    }
+
+    window.addEventListener("keydown", (event) => {
+      handleMovementKey(event, true);
     });
 
     window.addEventListener("keyup", (event) => {
-      keys[event.key.toLowerCase()] = false;
-      event.preventDefault();
+      handleMovementKey(event, false);
+    });
+
+    window.addEventListener("blur", resetMovementInput);
+    window.addEventListener("pagehide", resetMovementInput);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) resetMovementInput();
     });
 
     let running = false;
@@ -90,7 +121,13 @@ sprites.run2.src = "character/boy/running_boy_2.png";
         player.x += dx * player.speed * delta;
         player.y += dy * player.speed * delta;
 
-        if (dx !== 0) player.facing = dx > 0 ? 1 : -1;
+        if (dx !== 0) {
+          player.facing = dx > 0 ? 1 : -1;
+        }
+
+        // 走り画像は元画像の向きが待機画像と逆なので、
+        // 実際に画面へ描く向きを保存して、停止時の待機向きに使う
+        player.idleFacing = player.facing * -1;
 
         animationTime += delta;
       } else {
@@ -159,7 +196,7 @@ sprites.run2.src = "character/boy/running_boy_2.png";
       ctx.save();
 
       // 走り画像は元画像の向きが待機画像と逆なので、走っている間だけ反転条件を逆にする
-      const drawFacing = running ? player.facing * -1 : player.facing;
+      const drawFacing = running ? player.facing * -1 : player.idleFacing;
 
       if (drawFacing === -1) {
         ctx.translate(screenX + player.width, screenY);
