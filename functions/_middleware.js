@@ -23,9 +23,9 @@ export async function onRequest(context) {
     return unauthorized();
   }
 
-  const passwordMatches = await verifyPassword(
+  const passwordMatches = await verifyConfiguredPassword(
     credentials.password,
-    context.env.TAG_GAME_PASSWORD_HASH,
+    context.env,
   );
 
   if (!passwordMatches) return unauthorized();
@@ -42,8 +42,17 @@ export async function onRequest(context) {
 }
 
 function validateAuthConfig(env) {
-  if (!env.TAG_GAME_USERNAME || !env.TAG_GAME_PASSWORD_HASH) {
-    return new Response("Authentication is not configured.", {
+  if (!env.TAG_GAME_USERNAME) {
+    return new Response("Authentication username is not configured.", {
+      status: 500,
+      headers: securityHeaders,
+    });
+  }
+
+  if (env.TAG_GAME_PASSWORD) return null;
+
+  if (!env.TAG_GAME_PASSWORD_HASH) {
+    return new Response("Authentication password is not configured.", {
       status: 500,
       headers: securityHeaders,
     });
@@ -77,7 +86,15 @@ function parseBasicAuth(authHeader) {
   }
 }
 
-async function verifyPassword(password, storedHash) {
+async function verifyConfiguredPassword(password, env) {
+  if (env.TAG_GAME_PASSWORD) {
+    return timingSafeEqualText(password, env.TAG_GAME_PASSWORD);
+  }
+
+  return verifyPasswordHash(password, env.TAG_GAME_PASSWORD_HASH);
+}
+
+async function verifyPasswordHash(password, storedHash) {
   const [saltBase64, expectedHashBase64] = storedHash.split(PASSWORD_HASH_SEPARATOR);
   const salt = base64ToBytes(saltBase64);
   const expectedHash = base64ToBytes(expectedHashBase64);
@@ -107,6 +124,13 @@ async function hashPassword(password, salt) {
   );
 
   return new Uint8Array(derivedBits);
+}
+
+function timingSafeEqualText(left, right) {
+  return timingSafeEqual(
+    new TextEncoder().encode(left),
+    new TextEncoder().encode(right),
+  );
 }
 
 function timingSafeEqual(left, right) {
