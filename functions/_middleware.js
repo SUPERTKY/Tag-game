@@ -1,4 +1,5 @@
 const AUTH_REALM = "Tag Game";
+const DEFAULT_USERNAME = "player";
 const HASH_ALGORITHM = "SHA-256";
 const PBKDF2_ITERATIONS = 210000;
 const PBKDF2_KEY_LENGTH_BITS = 256;
@@ -19,13 +20,15 @@ export async function onRequest(context) {
   const authHeader = context.request.headers.get("Authorization") || "";
   const credentials = parseBasicAuth(authHeader);
 
-  if (!credentials || credentials.username !== context.env.TAG_GAME_USERNAME) {
+  const configuredUsername = getConfiguredUsername(context.env);
+
+  if (!credentials || credentials.username !== configuredUsername) {
     return unauthorized();
   }
 
-  const passwordMatches = await verifyPassword(
+  const passwordMatches = await verifyConfiguredPassword(
     credentials.password,
-    context.env.TAG_GAME_PASSWORD_HASH,
+    context.env,
   );
 
   if (!passwordMatches) return unauthorized();
@@ -42,8 +45,10 @@ export async function onRequest(context) {
 }
 
 function validateAuthConfig(env) {
-  if (!env.TAG_GAME_USERNAME || !env.TAG_GAME_PASSWORD_HASH) {
-    return new Response("Authentication is not configured.", {
+  if (env.TAG_GAME_PASSWORD) return null;
+
+  if (!env.TAG_GAME_PASSWORD_HASH) {
+    return new Response("Authentication password is not configured.", {
       status: 500,
       headers: securityHeaders,
     });
@@ -58,6 +63,10 @@ function validateAuthConfig(env) {
   }
 
   return null;
+}
+
+function getConfiguredUsername(env) {
+  return env.TAG_GAME_USERNAME || DEFAULT_USERNAME;
 }
 
 function parseBasicAuth(authHeader) {
@@ -77,7 +86,15 @@ function parseBasicAuth(authHeader) {
   }
 }
 
-async function verifyPassword(password, storedHash) {
+async function verifyConfiguredPassword(password, env) {
+  if (env.TAG_GAME_PASSWORD) {
+    return timingSafeEqualText(password, env.TAG_GAME_PASSWORD);
+  }
+
+  return verifyPasswordHash(password, env.TAG_GAME_PASSWORD_HASH);
+}
+
+async function verifyPasswordHash(password, storedHash) {
   const [saltBase64, expectedHashBase64] = storedHash.split(PASSWORD_HASH_SEPARATOR);
   const salt = base64ToBytes(saltBase64);
   const expectedHash = base64ToBytes(expectedHashBase64);
@@ -107,6 +124,13 @@ async function hashPassword(password, salt) {
   );
 
   return new Uint8Array(derivedBits);
+}
+
+function timingSafeEqualText(left, right) {
+  return timingSafeEqual(
+    new TextEncoder().encode(left),
+    new TextEncoder().encode(right),
+  );
 }
 
 function timingSafeEqual(left, right) {

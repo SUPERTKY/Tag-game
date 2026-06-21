@@ -1,0 +1,4 @@
+# ローカル確認用です。このファイルを .dev.vars にコピーして値を書き換えてください。
+# .dev.vars は .gitignore で除外されるので、実際のパスワードはコミットしないでください。
+TAG_GAME_USERNAME="player"
+TAG_GAME_PASSWORD="change-this-password"
