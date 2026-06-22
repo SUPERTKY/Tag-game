@@ -173,6 +173,11 @@
     const startGameButton = document.querySelector("#start-game-button");
     const canvas = document.querySelector("#game");
     const ctx = canvas.getContext("2d");
+    const playerId = getOrCreatePlayerId();
+    let latestPlayers = [];
+    let gameJoined = false;
+    let lastPlayerSyncAt = 0;
+    let playerSyncInFlight = false;
 
     adminButton.addEventListener("click", async () => {
       const password = window.prompt("管理者パスワードを入力してください");
@@ -201,7 +206,7 @@
       }
 
       if (roomStatus.status === "playing") {
-        showGameScreen();
+        await showGameScreen();
         return;
       }
 
@@ -225,7 +230,7 @@
       const roomStatus = await updateRoom("POST", { action: "start" });
       updateRoomControls(roomStatus);
       if (roomStatus.exists && roomStatus.status === "playing") {
-        showGameScreen();
+        await showGameScreen();
       }
     });
 
@@ -242,6 +247,7 @@
     async function refreshRoomStatus() {
       const response = await fetch("/api/room");
       const roomStatus = await response.json();
+      latestPlayers = roomStatus.players || [];
       updateRoomControls(roomStatus);
       syncScreenWithRoom(roomStatus);
       return roomStatus;
@@ -264,13 +270,16 @@
       adminScreen.classList.remove("active");
       waitScreen.style.display = "block";
       resetMovementInput();
+      gameJoined = false;
     }
 
-    function showGameScreen() {
+    async function showGameScreen() {
       waitScreen.style.display = "none";
       adminScreen.classList.remove("active");
       canvas.style.display = "block";
       previousTime = performance.now();
+      await sendPlayerState("join");
+      gameJoined = true;
     }
 
     function syncScreenWithRoom(roomStatus) {
@@ -281,12 +290,46 @@
       }
 
       if (roomStatus.status === "playing" && waitScreen.style.display !== "none") {
-        showGameScreen();
+        setMatchingMessage("ゲームは開始中です。参加する場合はマッチング開始を押してください。");
       }
     }
 
     window.setInterval(refreshRoomStatus, 2000);
     refreshRoomStatus();
+
+
+    function getOrCreatePlayerId() {
+      const storageKey = "tag-game-player-id";
+      const savedPlayerId = window.localStorage.getItem(storageKey);
+      if (savedPlayerId) return savedPlayerId;
+
+      const newPlayerId = crypto.randomUUID();
+      window.localStorage.setItem(storageKey, newPlayerId);
+      return newPlayerId;
+    }
+
+    async function sendPlayerState(action = "updatePlayer") {
+      if (playerSyncInFlight) return null;
+
+      playerSyncInFlight = true;
+
+      try {
+        const roomStatus = await updateRoom("POST", {
+          action,
+          playerId,
+          x: player.x,
+          y: player.y,
+          facing: player.idleFacing,
+          running,
+          worldWidth: world.width,
+          worldHeight: world.height,
+        });
+        latestPlayers = roomStatus.players || [];
+        return roomStatus;
+      } finally {
+        playerSyncInFlight = false;
+      }
+    }
 
     // ファイル名は手元の画像に合わせて変更してください
     const sprites = {
@@ -504,6 +547,34 @@
       }
     }
 
+
+    function drawOtherPlayers(camera) {
+      for (const otherPlayer of latestPlayers) {
+        if (otherPlayer.id === playerId) continue;
+
+        drawPlayerSprite(
+          sprites.idle,
+          otherPlayer.x - camera.x,
+          otherPlayer.y - camera.y,
+          otherPlayer.facing === -1 ? -1 : 1,
+        );
+      }
+    }
+
+    function drawPlayerSprite(image, screenX, screenY, drawFacing) {
+      ctx.save();
+
+      if (drawFacing === -1) {
+        ctx.translate(screenX + player.width, screenY);
+        ctx.scale(-1, 1);
+        ctx.drawImage(image, 0, 0, player.width, player.height);
+      } else {
+        ctx.drawImage(image, screenX, screenY, player.width, player.height);
+      }
+
+      ctx.restore();
+    }
+
     function drawPlayer(camera) {
       let image = sprites.idle;
 
@@ -516,20 +587,9 @@
       const screenX = player.x - camera.x;
       const screenY = player.y - camera.y;
 
-      ctx.save();
-
       // 走り画像は元画像の向きが待機画像と逆なので、走っている間だけ反転条件を逆にする
       const drawFacing = running ? player.facing * -1 : player.idleFacing;
-
-      if (drawFacing === -1) {
-        ctx.translate(screenX + player.width, screenY);
-        ctx.scale(-1, 1);
-        ctx.drawImage(image, 0, 0, player.width, player.height);
-      } else {
-        ctx.drawImage(image, screenX, screenY, player.width, player.height);
-      }
-
-      ctx.restore();
+      drawPlayerSprite(image, screenX, screenY, drawFacing);
     }
 
     function drawUI() {
@@ -550,8 +610,14 @@
 
       update(delta);
 
+      if (gameJoined && canvas.style.display === "block" && now - lastPlayerSyncAt > 200) {
+        lastPlayerSyncAt = now;
+        sendPlayerState();
+      }
+
       const camera = getCamera();
       drawWorld(camera);
+      drawOtherPlayers(camera);
       drawPlayer(camera);
       drawUI();
 
