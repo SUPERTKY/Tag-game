@@ -434,6 +434,7 @@
 
     let running = false;
     let animationTime = 0;
+    let worldAnimationTime = 0;
     let previousTime = performance.now();
 
     function update(delta) {
@@ -445,6 +446,7 @@
       if (keys["arrowup"] || keys["w"]) dy -= 1;
       if (keys["arrowdown"] || keys["s"]) dy += 1;
 
+      worldAnimationTime += delta;
       running = dx !== 0 || dy !== 0;
 
       // 斜め移動が速くなりすぎないよう調整
@@ -640,10 +642,10 @@
     }
 
     function getPlayerImage(isIt, isRunning) {
-      if (!isIt) return isRunning ? sprites.run1 : sprites.idle;
-      if (!isRunning) return sprites.enemyIdle;
+      if (!isRunning) return isIt ? sprites.enemyIdle : sprites.idle;
 
-      const frame = Math.floor(animationTime / 0.15) % 2;
+      const frame = Math.floor(worldAnimationTime / 0.15) % 2;
+      if (!isIt) return frame === 0 ? sprites.run1 : sprites.run2;
       return frame === 0 ? sprites.enemyRun1 : sprites.enemyRun2;
     }
 
