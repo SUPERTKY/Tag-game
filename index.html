@@ -23,6 +23,28 @@
       background-repeat: no-repeat;
     }
 
+    #matching-status {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      min-width: min(80vw, 520px);
+      padding: 14px 18px;
+      border-radius: 14px;
+      color: #fff;
+      font: bold 20px/1.5 sans-serif;
+      text-align: center;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.75);
+      background: rgba(0, 0, 0, 0.55);
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      pointer-events: none;
+    }
+
+    #matching-status.visible {
+      opacity: 1;
+    }
+
     #matching-button {
       position: absolute;
       left: 50%;
@@ -31,7 +53,7 @@
       width: min(34vw, 300px);
       height: auto;
       user-select: none;
-      pointer-events: none;
+      cursor: pointer;
     }
 
     #admin-button {
@@ -70,15 +92,49 @@
       display: block;
     }
 
-    #create-room-button {
+    .admin-image-button {
       position: absolute;
-      left: 50%;
-      top: 58%;
-      transform: translate(-50%, -50%);
-      width: min(42vw, 360px);
       height: auto;
       user-select: none;
-      pointer-events: none;
+      cursor: pointer;
+      transition: filter 0.2s ease, opacity 0.2s ease;
+    }
+
+    .admin-image-button[aria-disabled="true"] {
+      cursor: not-allowed;
+      filter: grayscale(0.7);
+      opacity: 0.55;
+    }
+
+    #create-room-button {
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: min(42vw, 360px);
+    }
+
+    #release-room-button {
+      display: none;
+      left: 50%;
+      top: 66%;
+      transform: translate(-50%, -50%);
+      width: min(34vw, 300px);
+    }
+
+    #release-room-button.visible {
+      display: block;
+    }
+
+    #start-game-button {
+      display: none;
+      left: 50%;
+      top: 82%;
+      transform: translate(-50%, -50%);
+      width: min(34vw, 300px);
+    }
+
+    #start-game-button.visible {
+      display: block;
     }
 
     canvas {
@@ -93,13 +149,16 @@
 </head>
 <body>
   <div id="wait-screen" aria-label="待機画面">
+    <div id="matching-status" role="status" aria-live="polite"></div>
     <img id="matching-button" src="image/Matching_Button.png" alt="マッチング開始" />
     <button id="admin-button" type="button" aria-label="管理者画面を開く">
       <img src="image/admin_logo.png" alt="" />
     </button>
   </div>
   <section id="admin-screen" aria-label="管理者画面">
-    <img id="create-room-button" src="image/create_room_button.png" alt="部屋を作成" />
+    <img id="create-room-button" class="admin-image-button" src="image/create_room_button.png" alt="部屋を作成" role="button" tabindex="0" />
+    <img id="release-room-button" class="admin-image-button" src="image/Release_button.png" alt="部屋を切断" role="button" tabindex="0" />
+    <img id="start-game-button" class="admin-image-button" src="image/start_game_button.png" alt="ゲームスタート" role="button" tabindex="0" />
   </section>
   <canvas id="game" width="960" height="540"></canvas>
 
@@ -107,6 +166,11 @@
     const waitScreen = document.querySelector("#wait-screen");
     const adminButton = document.querySelector("#admin-button");
     const adminScreen = document.querySelector("#admin-screen");
+    const matchingButton = document.querySelector("#matching-button");
+    const matchingStatus = document.querySelector("#matching-status");
+    const createRoomButton = document.querySelector("#create-room-button");
+    const releaseRoomButton = document.querySelector("#release-room-button");
+    const startGameButton = document.querySelector("#start-game-button");
     const canvas = document.querySelector("#game");
     const ctx = canvas.getContext("2d");
 
@@ -125,7 +189,104 @@
 
       waitScreen.style.display = "none";
       adminScreen.classList.add("active");
+      await refreshRoomStatus();
     });
+
+    matchingButton.addEventListener("click", async () => {
+      const roomStatus = await refreshRoomStatus();
+
+      if (!roomStatus.exists) {
+        setMatchingMessage("部屋がありません。管理者が部屋を作成するまで待ってください。");
+        return;
+      }
+
+      if (roomStatus.status === "playing") {
+        showGameScreen();
+        return;
+      }
+
+      setMatchingMessage("部屋があります。ゲーム開始まで待機してください。");
+    });
+
+    createRoomButton.addEventListener("click", async () => {
+      if (createRoomButton.getAttribute("aria-disabled") === "true") return;
+
+      await updateRoom("POST", { action: "create" });
+      await refreshRoomStatus();
+    });
+
+    releaseRoomButton.addEventListener("click", async () => {
+      await updateRoom("DELETE");
+      await refreshRoomStatus();
+      showWaitScreen();
+    });
+
+    startGameButton.addEventListener("click", async () => {
+      const roomStatus = await updateRoom("POST", { action: "start" });
+      updateRoomControls(roomStatus);
+      if (roomStatus.exists && roomStatus.status === "playing") {
+        showGameScreen();
+      }
+    });
+
+    async function updateRoom(method, body) {
+      const response = await fetch("/api/room", {
+        method,
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      return response.json();
+    }
+
+    async function refreshRoomStatus() {
+      const response = await fetch("/api/room");
+      const roomStatus = await response.json();
+      updateRoomControls(roomStatus);
+      syncScreenWithRoom(roomStatus);
+      return roomStatus;
+    }
+
+    function updateRoomControls(roomStatus) {
+      const roomExists = roomStatus.exists;
+      createRoomButton.setAttribute("aria-disabled", String(roomExists));
+      releaseRoomButton.classList.toggle("visible", roomExists);
+      startGameButton.classList.toggle("visible", roomExists);
+    }
+
+    function setMatchingMessage(message) {
+      matchingStatus.textContent = message;
+      matchingStatus.classList.add("visible");
+    }
+
+    function showWaitScreen() {
+      canvas.style.display = "none";
+      adminScreen.classList.remove("active");
+      waitScreen.style.display = "block";
+      resetMovementInput();
+    }
+
+    function showGameScreen() {
+      waitScreen.style.display = "none";
+      adminScreen.classList.remove("active");
+      canvas.style.display = "block";
+      previousTime = performance.now();
+    }
+
+    function syncScreenWithRoom(roomStatus) {
+      if (!roomStatus.exists && canvas.style.display === "block") {
+        setMatchingMessage("部屋が切断されたため、待機画面に戻りました。");
+        showWaitScreen();
+        return;
+      }
+
+      if (roomStatus.status === "playing" && waitScreen.style.display !== "none") {
+        showGameScreen();
+      }
+    }
+
+    window.setInterval(refreshRoomStatus, 2000);
+    refreshRoomStatus();
 
     // ファイル名は手元の画像に合わせて変更してください
     const sprites = {
