@@ -1,5 +1,6 @@
 const ROOM_TIMEOUT_MS = 1000 * 60 * 60 * 6;
 const PLAYER_TIMEOUT_MS = 1000 * 15;
+const ROOM_CACHE_KEY = "https://tag-game.local/cache/room-state";
 
 const securityHeaders = {
   "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; object-src 'none'; upgrade-insecure-requests",
@@ -10,25 +11,25 @@ const securityHeaders = {
   "Cache-Control": "private, no-store",
 };
 
-let room = null;
-
 export async function onRequest(context) {
-  clearExpiredRoom();
+  const cache = caches.default;
+  const room = clearExpiredRoom(await readRoom(cache));
 
   switch (context.request.method) {
     case "GET":
-      return jsonResponse(getRoomStatus());
+      if (room) await writeRoom(cache, room);
+      return jsonResponse(getRoomStatus(room));
     case "POST":
-      return handlePost(context.request);
+      return handlePost(context.request, cache, room);
     case "DELETE":
-      room = null;
-      return jsonResponse(getRoomStatus());
+      await deleteRoom(cache);
+      return jsonResponse(getRoomStatus(null));
     default:
       return jsonResponse({ ok: false }, 405, { Allow: "GET, POST, DELETE" });
   }
 }
 
-async function handlePost(request) {
+async function handlePost(request, cache, currentRoom) {
   let body = {};
 
   try {
@@ -36,6 +37,8 @@ async function handlePost(request) {
   } catch {
     body = {};
   }
+
+  let room = currentRoom;
 
   if (body.action === "create") {
     if (!room) {
@@ -48,7 +51,8 @@ async function handlePost(request) {
       };
     }
 
-    return jsonResponse(getRoomStatus(), room.status === "waiting" ? 201 : 200);
+    await writeRoom(cache, room);
+    return jsonResponse(getRoomStatus(room), room.status === "waiting" ? 201 : 200);
   }
 
   if (body.action === "start") {
@@ -56,7 +60,8 @@ async function handlePost(request) {
 
     room.status = "playing";
     room.updatedAt = Date.now();
-    return jsonResponse(getRoomStatus());
+    await writeRoom(cache, room);
+    return jsonResponse(getRoomStatus(room));
   }
 
   if (body.action === "join" || body.action === "updatePlayer") {
@@ -74,24 +79,27 @@ async function handlePost(request) {
       updatedAt: Date.now(),
     };
     room.updatedAt = Date.now();
-    clearInactivePlayers();
+    clearInactivePlayers(room);
+    await writeRoom(cache, room);
 
-    return jsonResponse(getRoomStatus());
+    return jsonResponse(getRoomStatus(room));
   }
 
   return jsonResponse({ ok: false, error: "Unknown action." }, 400);
 }
 
-function clearExpiredRoom() {
-  if (!room) return;
+function clearExpiredRoom(room) {
+  if (!room) return null;
 
   if (Date.now() - room.updatedAt > ROOM_TIMEOUT_MS) {
-    room = null;
+    return null;
   }
+
+  return room;
 }
 
-function getRoomStatus() {
-  clearInactivePlayers();
+function getRoomStatus(room) {
+  clearInactivePlayers(room);
 
   return {
     ok: true,
@@ -102,7 +110,7 @@ function getRoomStatus() {
   };
 }
 
-function clearInactivePlayers() {
+function clearInactivePlayers(room) {
   if (!room) return;
 
   const now = Date.now();
@@ -111,6 +119,34 @@ function clearInactivePlayers() {
       delete room.players[playerId];
     }
   }
+}
+
+async function readRoom(cache) {
+  const response = await cache.match(ROOM_CACHE_KEY);
+  if (!response) return null;
+
+  try {
+    return await response.json();
+  } catch {
+    await deleteRoom(cache);
+    return null;
+  }
+}
+
+async function writeRoom(cache, room) {
+  await cache.put(
+    ROOM_CACHE_KEY,
+    new Response(JSON.stringify(room), {
+      headers: {
+        "Cache-Control": `public, max-age=${Math.ceil(ROOM_TIMEOUT_MS / 1000)}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+    }),
+  );
+}
+
+async function deleteRoom(cache) {
+  await cache.delete(ROOM_CACHE_KEY);
 }
 
 function sanitizePlayerId(playerId) {
