@@ -70,16 +70,43 @@ async function handlePost(request, cache, currentRoom) {
     const playerId = sanitizePlayerId(body.playerId);
     if (!playerId) return jsonResponse({ ok: false, error: "プレイヤーIDが不正です。" }, 400);
 
+    clearInactivePlayers(room);
+
+    const existingPlayer = room.players[playerId];
+    const shouldBecomeIt = body.action === "join" && !hasItPlayer(room);
+
     room.players[playerId] = {
       id: playerId,
       x: clampNumber(body.x, 0, body.worldWidth || 5000),
       y: clampNumber(body.y, 0, body.worldHeight || 3500),
       facing: body.facing === -1 ? -1 : 1,
       running: Boolean(body.running),
+      isIt: Boolean(existingPlayer?.isIt || shouldBecomeIt),
       updatedAt: Date.now(),
     };
+    ensureItPlayer(room);
     room.updatedAt = Date.now();
+    await writeRoom(cache, room);
+
+    return jsonResponse(getRoomStatus(room));
+  }
+
+  if (body.action === "tag") {
+    if (!room) return jsonResponse({ ok: false, error: "部屋がありません。" }, 404);
+
+    const taggerId = sanitizePlayerId(body.playerId);
+    const targetId = sanitizePlayerId(body.targetId);
+    if (!taggerId || !targetId) return jsonResponse({ ok: false, error: "プレイヤーIDが不正です。" }, 400);
+
     clearInactivePlayers(room);
+
+    if (room.players[taggerId]?.isIt && room.players[targetId]) {
+      room.players[targetId].isIt = true;
+      room.players[targetId].updatedAt = Date.now();
+      room.updatedAt = Date.now();
+    }
+
+    ensureItPlayer(room);
     await writeRoom(cache, room);
 
     return jsonResponse(getRoomStatus(room));
@@ -119,6 +146,19 @@ function clearInactivePlayers(room) {
       delete room.players[playerId];
     }
   }
+
+  ensureItPlayer(room);
+}
+
+function hasItPlayer(room) {
+  return Object.values(room.players).some((player) => player.isIt);
+}
+
+function ensureItPlayer(room) {
+  if (!room || hasItPlayer(room)) return;
+
+  const [firstPlayer] = Object.values(room.players);
+  if (firstPlayer) firstPlayer.isIt = true;
 }
 
 async function readRoom(cache) {
