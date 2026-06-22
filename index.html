@@ -34,6 +34,62 @@
       pointer-events: none;
     }
 
+    #admin-button {
+      position: absolute;
+      left: 16px;
+      bottom: 16px;
+      width: 48px;
+      height: 48px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    #admin-button img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      user-select: none;
+    }
+
+    #admin-screen {
+      display: none;
+      min-height: 100vh;
+      box-sizing: border-box;
+      padding: 48px 24px;
+      color: #fff;
+      background: linear-gradient(135deg, #1d3557, #111827);
+      font-family: sans-serif;
+      text-align: center;
+    }
+
+    #admin-screen.active {
+      display: grid;
+      place-items: center;
+    }
+
+    .admin-panel {
+      width: min(90vw, 560px);
+      padding: 32px;
+      border: 2px solid rgba(255, 255, 255, 0.25);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.08);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    }
+
+    .admin-panel h1 {
+      margin: 0 0 16px;
+      font-size: clamp(28px, 6vw, 48px);
+    }
+
+    .admin-panel p {
+      margin: 0;
+      font-size: clamp(16px, 3vw, 20px);
+      line-height: 1.7;
+    }
+
     canvas {
       display: none;
       width: min(100vw, 960px);
@@ -47,12 +103,41 @@
 <body>
   <div id="wait-screen" aria-label="待機画面">
     <img id="matching-button" src="image/Matching_Button.png" alt="マッチング開始" />
+    <button id="admin-button" type="button" aria-label="管理者画面を開く">
+      <img src="image/admin_logo.png" alt="" />
+    </button>
   </div>
+  <section id="admin-screen" aria-label="管理者画面">
+    <div class="admin-panel">
+      <h1>管理者画面</h1>
+      <p>パスワードが確認されました。ここに管理者向けの内容を追加できます。</p>
+    </div>
+  </section>
   <canvas id="game" width="960" height="540"></canvas>
 
   <script>
+    const waitScreen = document.querySelector("#wait-screen");
+    const adminButton = document.querySelector("#admin-button");
+    const adminScreen = document.querySelector("#admin-screen");
     const canvas = document.querySelector("#game");
     const ctx = canvas.getContext("2d");
+
+    adminButton.addEventListener("click", async () => {
+      const password = window.prompt("管理者パスワードを入力してください");
+
+      if (!password) return;
+
+      const response = await fetch("/api/admin-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+
+      if (!response.ok) return;
+
+      waitScreen.style.display = "none";
+      adminScreen.classList.add("active");
+    });
 
     // ファイル名は手元の画像に合わせて変更してください
     const sprites = {
