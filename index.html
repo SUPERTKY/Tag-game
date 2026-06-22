@@ -285,6 +285,7 @@
       waitScreen.style.display = "none";
       adminScreen.classList.remove("active");
       canvas.style.display = "block";
+      spawnPlayerAtRandomOpenPosition();
       previousTime = performance.now();
       await sendPlayerState("join");
       gameJoined = true;
@@ -344,6 +345,9 @@
       idle: new Image(),
       run1: new Image(),
       run2: new Image(),
+      enemyIdle: new Image(),
+      enemyRun1: new Image(),
+      enemyRun2: new Image(),
       ground: new Image(),
       house: new Image(),
     };
@@ -351,6 +355,9 @@
     sprites.idle.src = "character/boy/standing_boy.png";
     sprites.run1.src = "character/boy/running_boy_1.png";
     sprites.run2.src = "character/boy/running_boy_2.png";
+    sprites.enemyIdle.src = "character/boy/enemy_standingboy.png";
+    sprites.enemyRun1.src = "character/boy/enemy_running_boy_2.png";
+    sprites.enemyRun2.src = "character/boy/enemy_running_boy_1.png";
     sprites.ground.src = "Ground.png";
     sprites.house.src = "Obstacle/house.png";
 
@@ -393,6 +400,8 @@
       "s",
     ]);
     const keys = {};
+    const recentlyTaggedPlayers = new Map();
+    const tagCooldownMs = 1000;
 
     function resetMovementInput() {
       for (const key of movementKeys) {
@@ -461,6 +470,7 @@
 
       // フィールド外に出ないようにする
       clampPlayerToWorld();
+      updateTagCollisions();
     }
 
     function rectanglesOverlap(a, b) {
@@ -473,14 +483,73 @@
     }
 
     function collidesWithObstacle(x, y) {
-      const nextPlayerArea = {
+      return obstacles.some((obstacle) => rectanglesOverlap(getPlayerArea(x, y), obstacle));
+    }
+
+    function getPlayerArea(x = player.x, y = player.y) {
+      return {
         x,
         y,
         width: player.width,
         height: player.height,
       };
+    }
 
-      return obstacles.some((obstacle) => rectanglesOverlap(nextPlayerArea, obstacle));
+    function spawnPlayerAtRandomOpenPosition() {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const x = Math.random() * (world.width - player.width);
+        const y = Math.random() * (world.height - player.height);
+
+        if (!collidesWithObstacle(x, y)) {
+          player.x = x;
+          player.y = y;
+          return;
+        }
+      }
+
+      player.x = 0;
+      player.y = 0;
+    }
+
+    function getCurrentPlayerState() {
+      return latestPlayers.find((otherPlayer) => otherPlayer.id === playerId);
+    }
+
+    function isCurrentPlayerIt() {
+      return Boolean(getCurrentPlayerState()?.isIt);
+    }
+
+    async function tagPlayer(targetId) {
+      const now = performance.now();
+      if (now - (recentlyTaggedPlayers.get(targetId) || 0) < tagCooldownMs) return;
+
+      recentlyTaggedPlayers.set(targetId, now);
+      const roomStatus = await updateRoom("POST", {
+        action: "tag",
+        playerId,
+        targetId,
+      });
+      latestPlayers = roomStatus.players || latestPlayers;
+    }
+
+    function updateTagCollisions() {
+      if (!gameJoined || !isCurrentPlayerIt()) return;
+
+      const currentPlayerArea = getPlayerArea();
+      for (const otherPlayer of latestPlayers) {
+        if (otherPlayer.id === playerId || otherPlayer.isIt) continue;
+
+        const otherPlayerArea = {
+          x: otherPlayer.x,
+          y: otherPlayer.y,
+          width: player.width,
+          height: player.height,
+        };
+
+        if (rectanglesOverlap(currentPlayerArea, otherPlayerArea)) {
+          tagPlayer(otherPlayer.id);
+        }
+      }
     }
 
     function clampPlayerToWorld() {
@@ -560,13 +629,22 @@
       for (const otherPlayer of latestPlayers) {
         if (otherPlayer.id === playerId) continue;
 
+        const image = getPlayerImage(otherPlayer.isIt, otherPlayer.running);
         drawPlayerSprite(
-          sprites.idle,
+          image,
           otherPlayer.x - camera.x,
           otherPlayer.y - camera.y,
           otherPlayer.facing === -1 ? -1 : 1,
         );
       }
+    }
+
+    function getPlayerImage(isIt, isRunning) {
+      if (!isIt) return isRunning ? sprites.run1 : sprites.idle;
+      if (!isRunning) return sprites.enemyIdle;
+
+      const frame = Math.floor(animationTime / 0.15) % 2;
+      return frame === 0 ? sprites.enemyRun1 : sprites.enemyRun2;
     }
 
     function drawPlayerSprite(image, screenX, screenY, drawFacing) {
@@ -584,13 +662,7 @@
     }
 
     function drawPlayer(camera) {
-      let image = sprites.idle;
-
-      if (running) {
-        // 0.15秒ごとに2フレームを切り替える
-        const frame = Math.floor(animationTime / 0.15) % 2;
-        image = frame === 0 ? sprites.run1 : sprites.run2;
-      }
+      const image = getPlayerImage(isCurrentPlayerIt(), running);
 
       const screenX = player.x - camera.x;
       const screenY = player.y - camera.y;
@@ -608,8 +680,8 @@
       ctx.font = "16px sans-serif";
       ctx.fillText("矢印キー / WASD で移動", 24, 35);
       ctx.fillText(`座標: ${Math.round(player.x)}, ${Math.round(player.y)}`, 24, 57);
-      ctx.fillText("家は4コマ分の障害物", 24, 79);
-      ctx.fillText("Cloudflare Pagesで36人向けに保護公開", 24, 101);
+      ctx.fillText(isCurrentPlayerIt() ? "あなたは鬼です。逃亡者に当たろう" : "あなたは逃亡者です。鬼から逃げよう", 24, 79);
+      ctx.fillText("家は4コマ分の障害物", 24, 101);
     }
 
     function loop(now) {
