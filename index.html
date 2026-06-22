@@ -176,6 +176,7 @@
     const playerId = getOrCreatePlayerId();
     let latestPlayers = [];
     let gameJoined = false;
+    let adminMode = false;
     let lastPlayerSyncAt = 0;
     let playerSyncInFlight = false;
 
@@ -192,6 +193,7 @@
 
       if (!response.ok) return;
 
+      adminMode = true;
       waitScreen.style.display = "none";
       adminScreen.classList.add("active");
       await refreshRoomStatus();
@@ -230,7 +232,7 @@
       const roomStatus = await updateRoom("POST", { action: "start" });
       updateRoomControls(roomStatus);
       if (roomStatus.exists && roomStatus.status === "playing") {
-        await showGameScreen();
+        setMatchingMessage("ゲームを開始しました。管理者は待機画面から進行を確認できます。");
       }
     });
 
@@ -271,9 +273,15 @@
       waitScreen.style.display = "block";
       resetMovementInput();
       gameJoined = false;
+      adminMode = false;
     }
 
     async function showGameScreen() {
+      if (adminMode) {
+        setMatchingMessage("管理者はゲームに参加しません。参加する場合は待機画面に戻ってください。");
+        return;
+      }
+
       waitScreen.style.display = "none";
       adminScreen.classList.remove("active");
       canvas.style.display = "block";
