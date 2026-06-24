@@ -179,6 +179,12 @@
     let adminMode = false;
     let lastPlayerSyncAt = 0;
     let playerSyncInFlight = false;
+    const previousItPlayerIds = new Set();
+    const activeExplosionEffects = new Map();
+    const explosionDurationMs = 1500;
+    const explosionFrameDurationMs = 150;
+    const explosionSound = new Audio("Sound/explosion.mp3");
+    explosionSound.preload = "auto";
 
     adminButton.addEventListener("click", async () => {
       const password = window.prompt("管理者パスワードを入力してください");
@@ -249,7 +255,7 @@
     async function refreshRoomStatus() {
       const response = await fetch("/api/room");
       const roomStatus = await response.json();
-      latestPlayers = roomStatus.players || [];
+      updateLatestPlayers(roomStatus.players || []);
       updateRoomControls(roomStatus);
       syncScreenWithRoom(roomStatus);
       return roomStatus;
@@ -274,6 +280,8 @@
       resetMovementInput();
       gameJoined = false;
       adminMode = false;
+      activeExplosionEffects.clear();
+      previousItPlayerIds.clear();
     }
 
     async function showGameScreen() {
@@ -333,7 +341,7 @@
           worldWidth: world.width,
           worldHeight: world.height,
         });
-        latestPlayers = roomStatus.players || [];
+        updateLatestPlayers(roomStatus.players || []);
         return roomStatus;
       } finally {
         playerSyncInFlight = false;
@@ -350,6 +358,8 @@
       enemyRun2: new Image(),
       ground: new Image(),
       house: new Image(),
+      explosion1: new Image(),
+      explosion2: new Image(),
     };
 
     sprites.idle.src = "character/boy/standing_boy.png";
@@ -360,6 +370,8 @@
     sprites.enemyRun2.src = "character/boy/enemy_running_boy_1.png";
     sprites.ground.src = "Ground.png";
     sprites.house.src = "Obstacle/house.png";
+    sprites.explosion1.src = "image/effect/explosion_1.png";
+    sprites.explosion2.src = "image/effect/explosion_2.png";
 
     // ワールドの広さ。canvasより大きくして、カメラ追従を作る
     const world = {
@@ -531,7 +543,7 @@
         playerId,
         targetId,
       });
-      latestPlayers = roomStatus.players || latestPlayers;
+      updateLatestPlayers(roomStatus.players || latestPlayers);
     }
 
     function updateTagCollisions() {
@@ -552,6 +564,77 @@
           tagPlayer(otherPlayer.id);
         }
       }
+    }
+
+
+    function updateLatestPlayers(players) {
+      const now = performance.now();
+      const currentPlayerIds = new Set(players.map((otherPlayer) => otherPlayer.id));
+
+      for (const otherPlayer of players) {
+        if (otherPlayer.isIt && previousItPlayerIds.has(otherPlayer.id) === false) {
+          const wasAlreadyKnown = latestPlayers.some((knownPlayer) => knownPlayer.id === otherPlayer.id);
+          if (wasAlreadyKnown) {
+            startExplosionEffect(otherPlayer.id, now);
+          }
+        }
+      }
+
+      previousItPlayerIds.clear();
+      for (const otherPlayer of players) {
+        if (otherPlayer.isIt) previousItPlayerIds.add(otherPlayer.id);
+      }
+
+      for (const playerIdWithEffect of activeExplosionEffects.keys()) {
+        if (!currentPlayerIds.has(playerIdWithEffect)) {
+          activeExplosionEffects.delete(playerIdWithEffect);
+        }
+      }
+
+      latestPlayers = players;
+    }
+
+    function startExplosionEffect(effectPlayerId, now) {
+      activeExplosionEffects.set(effectPlayerId, now);
+
+      try {
+        explosionSound.currentTime = 0;
+        const playPromise = explosionSound.play();
+        if (playPromise) playPromise.catch(() => {});
+      } catch {
+        // ブラウザの自動再生制限などで再生できない場合は、演出だけ続ける
+      }
+    }
+
+    function getExplosionImage(effectStartTime, now) {
+      const frame = Math.floor((now - effectStartTime) / explosionFrameDurationMs) % 2;
+      return frame === 0 ? sprites.explosion1 : sprites.explosion2;
+    }
+
+    function drawExplosionEffect(effectStartTime, camera, x, y) {
+      const image = getExplosionImage(effectStartTime, performance.now());
+      if (!image.complete || image.naturalWidth === 0) return;
+
+      const explosionSize = player.width * 2;
+      ctx.drawImage(
+        image,
+        x - camera.x + player.width / 2 - explosionSize / 2,
+        y - camera.y + player.height / 2 - explosionSize / 2,
+        explosionSize,
+        explosionSize,
+      );
+    }
+
+    function getActiveExplosionStart(effectPlayerId, now = performance.now()) {
+      const effectStartTime = activeExplosionEffects.get(effectPlayerId);
+      if (effectStartTime === undefined) return null;
+
+      if (now - effectStartTime >= explosionDurationMs) {
+        activeExplosionEffects.delete(effectPlayerId);
+        return null;
+      }
+
+      return effectStartTime;
     }
 
     function clampPlayerToWorld() {
@@ -631,6 +714,12 @@
       for (const otherPlayer of latestPlayers) {
         if (otherPlayer.id === playerId) continue;
 
+        const explosionStartTime = getActiveExplosionStart(otherPlayer.id);
+        if (explosionStartTime !== null) {
+          drawExplosionEffect(explosionStartTime, camera, otherPlayer.x, otherPlayer.y);
+          continue;
+        }
+
         const image = getPlayerImage(otherPlayer.isIt, otherPlayer.running);
         drawPlayerSprite(
           image,
@@ -664,6 +753,12 @@
     }
 
     function drawPlayer(camera) {
+      const explosionStartTime = getActiveExplosionStart(playerId);
+      if (explosionStartTime !== null) {
+        drawExplosionEffect(explosionStartTime, camera, player.x, player.y);
+        return;
+      }
+
       const image = getPlayerImage(isCurrentPlayerIt(), running);
 
       const screenX = player.x - camera.x;
