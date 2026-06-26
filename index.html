@@ -530,9 +530,8 @@
           player.facing = dx > 0 ? 1 : -1;
         }
 
-        // 走り画像は元画像の向きが待機画像と逆なので、
         // 実際に画面へ描く向きを保存して、停止時の待機向きに使う
-        player.idleFacing = player.facing * -1;
+        player.idleFacing = getRunningDrawFacing(getCurrentPlayerRole(), player.facing);
 
         animationTime += delta;
       } else {
@@ -822,6 +821,11 @@
       return frame === 0 ? sprites.enemyRun1 : sprites.enemyRun2;
     }
 
+    function getRunningDrawFacing(role, movementFacing) {
+      // boy の走り画像は待機画像と元の向きが逆だが、demon の走り画像は逆ではない
+      return role === "demon" ? movementFacing : movementFacing * -1;
+    }
+
     function drawPlayerSprite(image, screenX, screenY, drawFacing, role = getCurrentPlayerRole()) {
       ctx.save();
 
@@ -850,9 +854,9 @@
       const screenX = player.x - camera.x;
       const screenY = player.y - camera.y;
 
-      // 走り画像は元画像の向きが待機画像と逆なので、走っている間だけ反転条件を逆にする
-      const drawFacing = running ? player.facing * -1 : player.idleFacing;
-      drawPlayerSprite(image, screenX, screenY, drawFacing);
+      const role = getCurrentPlayerRole();
+      const drawFacing = running ? getRunningDrawFacing(role, player.facing) : player.idleFacing;
+      drawPlayerSprite(image, screenX, screenY, drawFacing, role);
     }
 
     function drawUI() {
