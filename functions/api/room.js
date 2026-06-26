@@ -75,6 +75,8 @@ async function handlePost(request, cache, currentRoom) {
     const existingPlayer = room.players[playerId];
     const shouldBecomeIt = body.action === "join" && !hasItPlayer(room);
 
+    const requestedRole = body.role === "demon" ? "demon" : "player";
+
     room.players[playerId] = {
       id: playerId,
       x: clampNumber(body.x, 0, body.worldWidth || 5000),
@@ -82,6 +84,7 @@ async function handlePost(request, cache, currentRoom) {
       facing: body.facing === -1 ? -1 : 1,
       running: Boolean(body.running),
       isIt: Boolean(existingPlayer?.isIt || shouldBecomeIt),
+      role: existingPlayer?.role === "demon" ? "demon" : requestedRole,
       updatedAt: Date.now(),
     };
     ensureItPlayer(room);

@@ -56,10 +56,9 @@
       cursor: pointer;
     }
 
-    #admin-button {
+    .wait-icon-button {
       position: absolute;
       left: 16px;
-      bottom: 16px;
       width: 48px;
       height: 48px;
       padding: 0;
@@ -68,7 +67,15 @@
       cursor: pointer;
     }
 
-    #admin-button img {
+    #teacher-button {
+      bottom: 80px;
+    }
+
+    #admin-button {
+      bottom: 16px;
+    }
+
+    .wait-icon-button img {
       display: block;
       width: 100%;
       height: 100%;
@@ -90,6 +97,21 @@
 
     #admin-screen.active {
       display: block;
+    }
+
+    #admin-player-count {
+      position: absolute;
+      left: 50%;
+      top: 26%;
+      transform: translate(-50%, -50%);
+      min-width: min(72vw, 440px);
+      padding: 14px 18px;
+      border-radius: 14px;
+      color: #fff;
+      font: bold 22px/1.4 sans-serif;
+      text-align: center;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.75);
+      background: rgba(0, 0, 0, 0.55);
     }
 
     .admin-image-button {
@@ -151,11 +173,15 @@
   <div id="wait-screen" aria-label="待機画面">
     <div id="matching-status" role="status" aria-live="polite"></div>
     <img id="matching-button" src="image/Matching_Button.png" alt="マッチング開始" />
-    <button id="admin-button" type="button" aria-label="管理者画面を開く">
+    <button id="teacher-button" class="wait-icon-button" type="button" aria-label="先生ログインを開く">
+      <img src="image/teacher_logo.png" alt="" />
+    </button>
+    <button id="admin-button" class="wait-icon-button" type="button" aria-label="管理者画面を開く">
       <img src="image/admin_logo.png" alt="" />
     </button>
   </div>
   <section id="admin-screen" aria-label="管理者画面">
+    <div id="admin-player-count" aria-live="polite">参加人数: 0人</div>
     <img id="create-room-button" class="admin-image-button" src="image/create_room_button.png" alt="部屋を作成" role="button" tabindex="0" />
     <img id="release-room-button" class="admin-image-button" src="image/Release_button.png" alt="部屋を切断" role="button" tabindex="0" />
     <img id="start-game-button" class="admin-image-button" src="image/start_game_button.png" alt="ゲームスタート" role="button" tabindex="0" />
@@ -164,10 +190,12 @@
 
   <script>
     const waitScreen = document.querySelector("#wait-screen");
+    const teacherButton = document.querySelector("#teacher-button");
     const adminButton = document.querySelector("#admin-button");
     const adminScreen = document.querySelector("#admin-screen");
     const matchingButton = document.querySelector("#matching-button");
     const matchingStatus = document.querySelector("#matching-status");
+    const adminPlayerCount = document.querySelector("#admin-player-count");
     const createRoomButton = document.querySelector("#create-room-button");
     const releaseRoomButton = document.querySelector("#release-room-button");
     const startGameButton = document.querySelector("#start-game-button");
@@ -177,6 +205,7 @@
     let latestPlayers = [];
     let gameJoined = false;
     let adminMode = false;
+    let teacherMode = false;
     let lastPlayerSyncAt = 0;
     let playerSyncInFlight = false;
     const previousItPlayerIds = new Set();
@@ -185,6 +214,23 @@
     const explosionFrameDurationMs = 150;
     const explosionSound = new Audio("Sound/explosion.mp3");
     explosionSound.preload = "auto";
+
+    teacherButton.addEventListener("click", async () => {
+      const password = window.prompt("先生パスワードを入力してください");
+
+      if (!password) return;
+
+      const response = await fetch("/api/teacher-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+
+      if (!response.ok) return;
+
+      teacherMode = true;
+      setMatchingMessage("先生として認証しました。参加するとdemonになります。");
+    });
 
     adminButton.addEventListener("click", async () => {
       const password = window.prompt("管理者パスワードを入力してください");
@@ -266,6 +312,7 @@
       createRoomButton.setAttribute("aria-disabled", String(roomExists));
       releaseRoomButton.classList.toggle("visible", roomExists);
       startGameButton.classList.toggle("visible", roomExists);
+      adminPlayerCount.textContent = `参加人数: ${(roomStatus.players || []).length}人`;
     }
 
     function setMatchingMessage(message) {
@@ -280,6 +327,7 @@
       resetMovementInput();
       gameJoined = false;
       adminMode = false;
+      teacherMode = false;
       activeExplosionEffects.clear();
       previousItPlayerIds.clear();
     }
@@ -340,6 +388,7 @@
           running,
           worldWidth: world.width,
           worldHeight: world.height,
+          role: teacherMode ? "demon" : "player",
         });
         updateLatestPlayers(roomStatus.players || []);
         return roomStatus;
@@ -360,6 +409,9 @@
       house: new Image(),
       explosion1: new Image(),
       explosion2: new Image(),
+      demonIdle: new Image(),
+      demonRun1: new Image(),
+      demonRun2: new Image(),
     };
 
     sprites.idle.src = "character/boy/standing_boy.png";
@@ -372,6 +424,9 @@
     sprites.house.src = "Obstacle/house.png";
     sprites.explosion1.src = "image/effect/explosion_1.png";
     sprites.explosion2.src = "image/effect/explosion_2.png";
+    sprites.demonIdle.src = "character/demon/enemy_standing_demon.png";
+    sprites.demonRun1.src = "character/demon/enemy_running_demon_1.png";
+    sprites.demonRun2.src = "character/demon/enemy_running_demon_2.png";
 
     // ワールドの広さ。canvasより大きくして、カメラ追従を作る
     const world = {
@@ -391,11 +446,13 @@
       },
     ];
 
+    const basePlayerSize = 48;
+    const demonScale = Math.sqrt(3);
     const player = {
       x: world.width / 2,
       y: world.height / 2,
-      width: 48,
-      height: 48,
+      width: basePlayerSize,
+      height: basePlayerSize,
       speed: 280, // 1秒あたりの移動量
       facing: 1,  // 1: 右向き / -1: 左向き
       idleFacing: 1, // 最後に走った見た目の向き
@@ -467,7 +524,7 @@
         dx /= length;
         dy /= length;
 
-        movePlayer(dx * player.speed * delta, dy * player.speed * delta);
+        movePlayer(dx * getCurrentPlayerSpeed() * delta, dy * getCurrentPlayerSpeed() * delta);
 
         if (dx !== 0) {
           player.facing = dx > 0 ? 1 : -1;
@@ -500,19 +557,37 @@
       return obstacles.some((obstacle) => rectanglesOverlap(getPlayerArea(x, y), obstacle));
     }
 
-    function getPlayerArea(x = player.x, y = player.y) {
+    function getPlayerDimensions(role = getCurrentPlayerRole()) {
+      const scale = role === "demon" ? demonScale : 1;
+      return {
+        width: basePlayerSize * scale,
+        height: basePlayerSize * scale,
+      };
+    }
+
+    function getCurrentPlayerRole() {
+      return getCurrentPlayerState()?.role || (teacherMode ? "demon" : "player");
+    }
+
+    function getCurrentPlayerSpeed() {
+      return getCurrentPlayerRole() === "demon" ? player.speed * 1.35 : player.speed;
+    }
+
+    function getPlayerArea(x = player.x, y = player.y, role = getCurrentPlayerRole()) {
+      const dimensions = getPlayerDimensions(role);
       return {
         x,
         y,
-        width: player.width,
-        height: player.height,
+        width: dimensions.width,
+        height: dimensions.height,
       };
     }
 
     function spawnPlayerAtRandomOpenPosition() {
       for (let attempt = 0; attempt < 200; attempt += 1) {
-        const x = Math.random() * (world.width - player.width);
-        const y = Math.random() * (world.height - player.height);
+        const dimensions = getPlayerDimensions();
+        const x = Math.random() * (world.width - dimensions.width);
+        const y = Math.random() * (world.height - dimensions.height);
 
         if (!collidesWithObstacle(x, y)) {
           player.x = x;
@@ -556,8 +631,7 @@
         const otherPlayerArea = {
           x: otherPlayer.x,
           y: otherPlayer.y,
-          width: player.width,
-          height: player.height,
+          ...getPlayerDimensions(otherPlayer.role),
         };
 
         if (rectanglesOverlap(currentPlayerArea, otherPlayerArea)) {
@@ -598,7 +672,7 @@
       activeExplosionEffects.set(effectPlayerId, now);
 
       try {
-        explosionSound.currentTime = 0;
+        explosionSound.currentTime = 0.5;
         const playPromise = explosionSound.play();
         if (playPromise) playPromise.catch(() => {});
       } catch {
@@ -611,15 +685,16 @@
       return frame === 0 ? sprites.explosion1 : sprites.explosion2;
     }
 
-    function drawExplosionEffect(effectStartTime, camera, x, y) {
+    function drawExplosionEffect(effectStartTime, camera, x, y, role = "player") {
       const image = getExplosionImage(effectStartTime, performance.now());
       if (!image.complete || image.naturalWidth === 0) return;
 
-      const explosionSize = player.width * 2;
+      const dimensions = getPlayerDimensions(role);
+      const explosionSize = dimensions.width * 2;
       ctx.drawImage(
         image,
-        x - camera.x + player.width / 2 - explosionSize / 2,
-        y - camera.y + player.height / 2 - explosionSize / 2,
+        x - camera.x + dimensions.width / 2 - explosionSize / 2,
+        y - camera.y + dimensions.height / 2 - explosionSize / 2,
         explosionSize,
         explosionSize,
       );
@@ -638,25 +713,28 @@
     }
 
     function clampPlayerToWorld() {
-      player.x = Math.max(0, Math.min(world.width - player.width, player.x));
-      player.y = Math.max(0, Math.min(world.height - player.height, player.y));
+      const dimensions = getPlayerDimensions();
+      player.x = Math.max(0, Math.min(world.width - dimensions.width, player.x));
+      player.y = Math.max(0, Math.min(world.height - dimensions.height, player.y));
     }
 
     function movePlayer(deltaX, deltaY) {
-      const nextX = Math.max(0, Math.min(world.width - player.width, player.x + deltaX));
+      const dimensions = getPlayerDimensions();
+      const nextX = Math.max(0, Math.min(world.width - dimensions.width, player.x + deltaX));
       if (!collidesWithObstacle(nextX, player.y)) {
         player.x = nextX;
       }
 
-      const nextY = Math.max(0, Math.min(world.height - player.height, player.y + deltaY));
+      const nextY = Math.max(0, Math.min(world.height - dimensions.height, player.y + deltaY));
       if (!collidesWithObstacle(player.x, nextY)) {
         player.y = nextY;
       }
     }
 
     function getCamera() {
-      let x = player.x + player.width / 2 - canvas.width / 2;
-      let y = player.y + player.height / 2 - canvas.height / 2;
+      const dimensions = getPlayerDimensions();
+      let x = player.x + dimensions.width / 2 - canvas.width / 2;
+      let y = player.y + dimensions.height / 2 - canvas.height / 2;
 
       x = Math.max(0, Math.min(world.width - canvas.width, x));
       y = Math.max(0, Math.min(world.height - canvas.height, y));
@@ -716,37 +794,45 @@
 
         const explosionStartTime = getActiveExplosionStart(otherPlayer.id);
         if (explosionStartTime !== null) {
-          drawExplosionEffect(explosionStartTime, camera, otherPlayer.x, otherPlayer.y);
+          drawExplosionEffect(explosionStartTime, camera, otherPlayer.x, otherPlayer.y, otherPlayer.role);
           continue;
         }
 
-        const image = getPlayerImage(otherPlayer.isIt, otherPlayer.running);
+        const image = getPlayerImage(otherPlayer.isIt, otherPlayer.running, otherPlayer.role);
         drawPlayerSprite(
           image,
           otherPlayer.x - camera.x,
           otherPlayer.y - camera.y,
           otherPlayer.facing === -1 ? -1 : 1,
+          otherPlayer.role,
         );
       }
     }
 
-    function getPlayerImage(isIt, isRunning) {
-      if (!isRunning) return isIt ? sprites.enemyIdle : sprites.idle;
-
+    function getPlayerImage(isIt, isRunning, role = "player") {
       const frame = Math.floor(worldAnimationTime / 0.15) % 2;
+
+      if (role === "demon") {
+        if (!isRunning) return sprites.demonIdle;
+        return frame === 0 ? sprites.demonRun1 : sprites.demonRun2;
+      }
+
+      if (!isRunning) return isIt ? sprites.enemyIdle : sprites.idle;
       if (!isIt) return frame === 0 ? sprites.run1 : sprites.run2;
       return frame === 0 ? sprites.enemyRun1 : sprites.enemyRun2;
     }
 
-    function drawPlayerSprite(image, screenX, screenY, drawFacing) {
+    function drawPlayerSprite(image, screenX, screenY, drawFacing, role = getCurrentPlayerRole()) {
       ctx.save();
 
+      const dimensions = getPlayerDimensions(role);
+
       if (drawFacing === -1) {
-        ctx.translate(screenX + player.width, screenY);
+        ctx.translate(screenX + dimensions.width, screenY);
         ctx.scale(-1, 1);
-        ctx.drawImage(image, 0, 0, player.width, player.height);
+        ctx.drawImage(image, 0, 0, dimensions.width, dimensions.height);
       } else {
-        ctx.drawImage(image, screenX, screenY, player.width, player.height);
+        ctx.drawImage(image, screenX, screenY, dimensions.width, dimensions.height);
       }
 
       ctx.restore();
@@ -755,11 +841,11 @@
     function drawPlayer(camera) {
       const explosionStartTime = getActiveExplosionStart(playerId);
       if (explosionStartTime !== null) {
-        drawExplosionEffect(explosionStartTime, camera, player.x, player.y);
+        drawExplosionEffect(explosionStartTime, camera, player.x, player.y, getCurrentPlayerRole());
         return;
       }
 
-      const image = getPlayerImage(isCurrentPlayerIt(), running);
+      const image = getPlayerImage(isCurrentPlayerIt(), running, getCurrentPlayerRole());
 
       const screenX = player.x - camera.x;
       const screenY = player.y - camera.y;
