@@ -882,7 +882,8 @@
     }
 
     function drawUI() {
-      const roleText = isCurrentPlayerIt() ? "鬼" : "逃亡者";
+      const role = getCurrentPlayerRole();
+      const roleText = role === "demon" ? "demon" : (isCurrentPlayerIt() ? "鬼" : "逃亡者");
       ctx.save();
       ctx.font = "bold 52px sans-serif";
       ctx.textAlign = "center";

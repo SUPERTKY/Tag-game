@@ -79,9 +79,9 @@ async function handlePost(request, cache, currentRoom) {
     clearInactivePlayers(room);
 
     const existingPlayer = room.players[playerId];
-    const requestedRole = body.role === "demon" ? "demon" : "player";
-    const role = existingPlayer?.role === "demon" ? "demon" : requestedRole;
-    const isIt = Boolean(existingPlayer?.isIt || role === "demon");
+    const requestedRole = normalizePlayerRole(body.role);
+    const role = isItRole(existingPlayer?.role) ? existingPlayer.role : requestedRole;
+    const isIt = Boolean(existingPlayer?.isIt || isItRole(role));
     const frozenItSpawn = room.status === "countdown" && isIt;
 
     room.players[playerId] = {
@@ -111,6 +111,7 @@ async function handlePost(request, cache, currentRoom) {
 
     if (room.status === "playing" && room.players[taggerId]?.isIt && room.players[targetId]) {
       room.players[targetId].isIt = true;
+      if (room.players[targetId].role !== "demon") room.players[targetId].role = "oni";
       room.players[targetId].updatedAt = Date.now();
       room.updatedAt = Date.now();
     }
@@ -171,13 +172,26 @@ function normalizeRoom(room) {
   return room;
 }
 
+function normalizePlayerRole(role) {
+  return isItRole(role) ? role : "player";
+}
+
+function isItRole(role) {
+  return role === "demon" || role === "oni";
+}
+
 function assignItPlayersForRound(room) {
   const players = Object.values(room.players);
   if (players.length === 0) return;
 
   const targetItCount = Math.ceil(players.length * 0.1);
   for (const player of players) {
-    player.isIt = player.role === "demon";
+    if (player.role === "demon") {
+      player.isIt = true;
+    } else {
+      player.role = "player";
+      player.isIt = false;
+    }
   }
 
   const candidates = shufflePlayers(players.filter((player) => !player.isIt));
@@ -185,6 +199,7 @@ function assignItPlayersForRound(room) {
   for (const player of candidates) {
     if (currentItCount >= targetItCount) break;
     player.isIt = true;
+    player.role = "oni";
     currentItCount += 1;
   }
 
