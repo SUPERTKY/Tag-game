@@ -171,20 +171,21 @@ function normalizeRoom(room) {
   return room;
 }
 
-function hasItPlayer(room) {
-  return Object.values(room.players).some((player) => player.isIt);
-}
-
 function assignItPlayersForRound(room) {
   const players = Object.values(room.players);
   if (players.length === 0) return;
 
+  const targetItCount = Math.ceil(players.length * 0.1);
   for (const player of players) {
     player.isIt = player.role === "demon";
   }
 
-  if (!hasItPlayer(room)) {
-    players[Math.floor(Math.random() * players.length)].isIt = true;
+  const candidates = shufflePlayers(players.filter((player) => !player.isIt));
+  let currentItCount = players.filter((player) => player.isIt).length;
+  for (const player of candidates) {
+    if (currentItCount >= targetItCount) break;
+    player.isIt = true;
+    currentItCount += 1;
   }
 
   for (const player of players) {
@@ -194,6 +195,15 @@ function assignItPlayersForRound(room) {
     player.running = false;
     player.updatedAt = Date.now();
   }
+}
+
+function shufflePlayers(players) {
+  const shuffledPlayers = [...players];
+  for (let index = shuffledPlayers.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffledPlayers[index], shuffledPlayers[swapIndex]] = [shuffledPlayers[swapIndex], shuffledPlayers[index]];
+  }
+  return shuffledPlayers;
 }
 
 function getDemonSpawnX(playerId) {
