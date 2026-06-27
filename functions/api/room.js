@@ -62,6 +62,17 @@ async function handlePost(request, cache, currentRoom) {
     if (!room) return jsonResponse({ ok: false, error: "部屋がありません。" }, 404);
 
     clearInactivePlayers(room);
+    room.status = "preparing";
+    room.countdownEndsAt = null;
+    room.updatedAt = Date.now();
+    await writeRoom(cache, room);
+    return jsonResponse(getRoomStatus(room));
+  }
+
+  if (body.action === "startTagGame") {
+    if (!room) return jsonResponse({ ok: false, error: "部屋がありません。" }, 404);
+
+    clearInactivePlayers(room);
     assignItPlayersForRound(room);
     room.status = "countdown";
     room.countdownEndsAt = Date.now() + GAME_COUNTDOWN_MS;
@@ -81,7 +92,7 @@ async function handlePost(request, cache, currentRoom) {
     const existingPlayer = room.players[playerId];
     const requestedRole = normalizePlayerRole(body.role);
     const role = isItRole(existingPlayer?.role) ? existingPlayer.role : requestedRole;
-    const isIt = Boolean(existingPlayer?.isIt || isItRole(role));
+    const isIt = Boolean(existingPlayer?.isIt || (isRoundStarted(room.status) && isItRole(role)));
     const frozenItSpawn = room.status === "countdown" && isIt;
 
     room.players[playerId] = {
@@ -178,6 +189,10 @@ function normalizePlayerRole(role) {
 
 function isItRole(role) {
   return role === "demon" || role === "oni";
+}
+
+function isRoundStarted(status) {
+  return status === "countdown" || status === "playing";
 }
 
 function assignItPlayersForRound(room) {
