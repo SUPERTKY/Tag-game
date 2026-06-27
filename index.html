@@ -184,7 +184,7 @@
     <div id="admin-player-count" aria-live="polite">参加人数: 0人</div>
     <img id="create-room-button" class="admin-image-button" src="image/create_room_button.png" alt="部屋を作成" role="button" tabindex="0" />
     <img id="release-room-button" class="admin-image-button" src="image/Release_button.png" alt="部屋を切断" role="button" tabindex="0" />
-    <img id="start-game-button" class="admin-image-button" src="image/start_game_button.png" alt="ゲームスタート" role="button" tabindex="0" />
+    <img id="start-game-button" class="admin-image-button" src="image/taggame_start_button.png" alt="ゲームスタート" role="button" tabindex="0" />
   </section>
   <canvas id="game" width="960" height="540"></canvas>
 
@@ -208,6 +208,8 @@
     let teacherMode = false;
     let lastPlayerSyncAt = 0;
     let playerSyncInFlight = false;
+    let latestRoomStatus = "none";
+    let countdownEndsAt = null;
     const previousItPlayerIds = new Set();
     const activeExplosionEffects = new Map();
     const explosionDurationMs = 1500;
@@ -229,7 +231,7 @@
       if (!response.ok) return;
 
       teacherMode = true;
-      setMatchingMessage("先生として認証しました。参加するとdemonになります。");
+      setMatchingMessage("先生として認証しました。参加すると鬼になります。");
     });
 
     adminButton.addEventListener("click", async () => {
@@ -259,7 +261,7 @@
         return;
       }
 
-      if (roomStatus.status === "playing") {
+      if (roomStatus.status === "playing" || roomStatus.status === "countdown") {
         await showGameScreen();
         return;
       }
@@ -283,8 +285,8 @@
     startGameButton.addEventListener("click", async () => {
       const roomStatus = await updateRoom("POST", { action: "start" });
       updateRoomControls(roomStatus);
-      if (roomStatus.exists && roomStatus.status === "playing") {
-        setMatchingMessage("ゲームを開始しました。管理者は待機画面から進行を確認できます。");
+      if (roomStatus.exists && roomStatus.status === "countdown") {
+        setMatchingMessage("鬼を配置しました。5秒後にゲームを開始します。");
       }
     });
 
@@ -301,7 +303,10 @@
     async function refreshRoomStatus() {
       const response = await fetch("/api/room");
       const roomStatus = await response.json();
+      latestRoomStatus = roomStatus.status || "none";
+      countdownEndsAt = roomStatus.countdownEndsAt || null;
       updateLatestPlayers(roomStatus.players || []);
+      syncCurrentPlayerPosition();
       updateRoomControls(roomStatus);
       syncScreenWithRoom(roomStatus);
       return roomStatus;
@@ -344,6 +349,7 @@
       spawnPlayerAtRandomOpenPosition();
       previousTime = performance.now();
       await sendPlayerState("join");
+      syncCurrentPlayerPosition();
       gameJoined = true;
     }
 
@@ -354,7 +360,7 @@
         return;
       }
 
-      if (roomStatus.status === "playing" && waitScreen.style.display !== "none") {
+      if ((roomStatus.status === "playing" || roomStatus.status === "countdown") && waitScreen.style.display !== "none") {
         setMatchingMessage("ゲームは開始中です。参加する場合はマッチング開始を押してください。");
       }
     }
@@ -516,7 +522,7 @@
       if (keys["arrowdown"] || keys["s"]) dy += 1;
 
       worldAnimationTime += delta;
-      running = dx !== 0 || dy !== 0;
+      running = canMove() && (dx !== 0 || dy !== 0);
 
       // 斜め移動が速くなりすぎないよう調整
       if (running) {
@@ -607,6 +613,21 @@
       return Boolean(getCurrentPlayerState()?.isIt);
     }
 
+    function canMove() {
+      return latestRoomStatus === "playing";
+    }
+
+    function syncCurrentPlayerPosition() {
+      const currentPlayer = getCurrentPlayerState();
+      if (!currentPlayer || latestRoomStatus === "playing") return;
+
+      player.x = currentPlayer.x;
+      player.y = currentPlayer.y;
+      player.idleFacing = currentPlayer.facing === -1 ? -1 : 1;
+      running = false;
+      resetMovementInput();
+    }
+
     async function tagPlayer(targetId) {
       const now = performance.now();
       if (now - (recentlyTaggedPlayers.get(targetId) || 0) < tagCooldownMs) return;
@@ -621,7 +642,7 @@
     }
 
     function updateTagCollisions() {
-      if (!gameJoined || !isCurrentPlayerIt()) return;
+      if (!gameJoined || !canMove() || !isCurrentPlayerIt()) return;
 
       const currentPlayerArea = getPlayerArea();
       for (const otherPlayer of latestPlayers) {
@@ -665,6 +686,7 @@
       }
 
       latestPlayers = players;
+      syncCurrentPlayerPosition();
     }
 
     function startExplosionEffect(effectPlayerId, now) {
@@ -860,20 +882,36 @@
     }
 
     function drawUI() {
-      ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-      ctx.fillRect(12, 12, 360, 98);
+      const role = getCurrentPlayerRole();
+      const roleText = role === "demon" ? "demon" : (isCurrentPlayerIt() ? "鬼" : "逃亡者");
+      ctx.save();
+      ctx.font = "bold 52px sans-serif";
+      ctx.textAlign = "center";
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.fillStyle = isCurrentPlayerIt() ? "#e60012" : "#33d7ff";
+      ctx.strokeText(roleText, canvas.width / 2, 68);
+      ctx.fillText(roleText, canvas.width / 2, 68);
 
-      ctx.fillStyle = "white";
-      ctx.font = "16px sans-serif";
-      ctx.fillText("矢印キー / WASD で移動", 24, 35);
-      ctx.fillText(`座標: ${Math.round(player.x)}, ${Math.round(player.y)}`, 24, 57);
-      ctx.fillText(isCurrentPlayerIt() ? "あなたは鬼です。逃亡者に当たろう" : "あなたは逃亡者です。鬼から逃げよう", 24, 79);
-      ctx.fillText("家は4コマ分の障害物", 24, 101);
+      if (!canMove()) {
+        const remainingSeconds = countdownEndsAt ? Math.max(0, Math.ceil((countdownEndsAt - Date.now()) / 1000)) : 5;
+        ctx.font = "bold 42px sans-serif";
+        ctx.fillStyle = "#ffffff";
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+        ctx.strokeText(`開始まで ${remainingSeconds}`, canvas.width / 2, 124);
+        ctx.fillText(`開始まで ${remainingSeconds}`, canvas.width / 2, 124);
+      }
+      ctx.restore();
     }
 
     function loop(now) {
       const delta = Math.min((now - previousTime) / 1000, 0.05);
       previousTime = now;
+
+      if (countdownEndsAt && latestRoomStatus === "countdown" && Date.now() >= countdownEndsAt) {
+        latestRoomStatus = "playing";
+        countdownEndsAt = null;
+      }
 
       update(delta);
 
