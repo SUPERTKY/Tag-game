@@ -65,6 +65,7 @@ async function handlePost(request, cache, currentRoom) {
     room.status = "preparing";
     room.countdownEndsAt = null;
     room.updatedAt = Date.now();
+    await mergeLatestRoomState(cache, room);
     await writeRoom(cache, room);
     return jsonResponse(getRoomStatus(room));
   }
@@ -88,6 +89,7 @@ async function handlePost(request, cache, currentRoom) {
     if (!playerId) return jsonResponse({ ok: false, error: "プレイヤーIDが不正です。" }, 400);
 
     clearInactivePlayers(room);
+    await mergeLatestRoomState(cache, room);
 
     const existingPlayer = room.players[playerId];
     const requestedRole = normalizePlayerRole(body.role);
@@ -119,6 +121,7 @@ async function handlePost(request, cache, currentRoom) {
     if (!taggerId || !targetId) return jsonResponse({ ok: false, error: "プレイヤーIDが不正です。" }, 400);
 
     clearInactivePlayers(room);
+    await mergeLatestRoomState(cache, room);
 
     if (room.status === "playing" && room.players[taggerId]?.isIt && room.players[targetId]) {
       room.players[targetId].isIt = true;
@@ -133,6 +136,43 @@ async function handlePost(request, cache, currentRoom) {
   }
 
   return jsonResponse({ ok: false, error: "Unknown action." }, 400);
+}
+
+async function mergeLatestRoomState(cache, room) {
+  if (!room) return;
+
+  const latestRoom = normalizeRoom(await readRoom(cache));
+  if (!latestRoom || latestRoom.id !== room.id) return;
+
+  if (getStatusRank(latestRoom.status) > getStatusRank(room.status)) {
+    room.status = latestRoom.status;
+    room.countdownEndsAt = latestRoom.countdownEndsAt || null;
+  } else if (latestRoom.status === room.status && latestRoom.countdownEndsAt) {
+    room.countdownEndsAt = latestRoom.countdownEndsAt;
+  }
+
+  for (const [latestPlayerId, latestPlayer] of Object.entries(latestRoom.players || {})) {
+    const player = room.players[latestPlayerId];
+    if (!player || !latestPlayer.isIt) continue;
+
+    player.isIt = true;
+    if (isItRole(latestPlayer.role)) player.role = latestPlayer.role;
+  }
+}
+
+function getStatusRank(status) {
+  switch (status) {
+    case "waiting":
+      return 0;
+    case "preparing":
+      return 1;
+    case "countdown":
+      return 2;
+    case "playing":
+      return 3;
+    default:
+      return -1;
+  }
 }
 
 function clearExpiredRoom(room) {
