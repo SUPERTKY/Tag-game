@@ -917,19 +917,32 @@
       ctx.strokeText(roleText, canvas.width / 2, 68);
       ctx.fillText(roleText, canvas.width / 2, 68);
 
+      let nextMessageY = 124;
+
+      if (isTagGameStarted() && isCurrentPlayerIt()) {
+        const remainingRunnerCount = latestPlayers.filter((otherPlayer) => !otherPlayer.isIt).length;
+        const remainingRunnerText = `あと${remainingRunnerCount}人`;
+        ctx.font = "bold 42px sans-serif";
+        ctx.fillStyle = "#ffffff";
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+        ctx.strokeText(remainingRunnerText, canvas.width / 2, nextMessageY);
+        ctx.fillText(remainingRunnerText, canvas.width / 2, nextMessageY);
+        nextMessageY += 52;
+      }
+
       if (latestRoomStatus === "countdown") {
         const remainingSeconds = countdownEndsAt ? Math.max(0, Math.ceil((countdownEndsAt - Date.now()) / 1000)) : 5;
         ctx.font = "bold 42px sans-serif";
         ctx.fillStyle = "#ffffff";
         ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
-        ctx.strokeText(`開始まで ${remainingSeconds}`, canvas.width / 2, 124);
-        ctx.fillText(`開始まで ${remainingSeconds}`, canvas.width / 2, 124);
+        ctx.strokeText(`開始まで ${remainingSeconds}`, canvas.width / 2, nextMessageY);
+        ctx.fillText(`開始まで ${remainingSeconds}`, canvas.width / 2, nextMessageY);
       } else if (latestRoomStatus === "preparing") {
         ctx.font = "bold 28px sans-serif";
         ctx.fillStyle = "#ffffff";
         ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
-        ctx.strokeText("鬼ごっこ開始まで待機", canvas.width / 2, 116);
-        ctx.fillText("鬼ごっこ開始まで待機", canvas.width / 2, 116);
+        ctx.strokeText("鬼ごっこ開始まで待機", canvas.width / 2, nextMessageY - 8);
+        ctx.fillText("鬼ごっこ開始まで待機", canvas.width / 2, nextMessageY - 8);
       }
       ctx.restore();
     }
