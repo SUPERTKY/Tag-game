@@ -221,6 +221,9 @@
     let playerSyncInFlight = false;
     let latestRoomStatus = "none";
     let countdownEndsAt = null;
+    let roundEndsAt = null;
+    let roundWinner = null;
+    let victoryStartedAt = null;
     const previousItPlayerIds = new Set();
     const activeExplosionEffects = new Map();
     const explosionDurationMs = 1500;
@@ -324,6 +327,8 @@
       const roomStatus = await response.json();
       latestRoomStatus = roomStatus.status || "none";
       countdownEndsAt = roomStatus.countdownEndsAt || null;
+      roundEndsAt = roomStatus.roundEndsAt || null;
+      setRoundWinner(roomStatus.winner || null);
       updateLatestPlayers(roomStatus.players || []);
       syncCurrentPlayerPosition();
       updateRoomControls(roomStatus);
@@ -355,6 +360,8 @@
       teacherMode = false;
       activeExplosionEffects.clear();
       previousItPlayerIds.clear();
+      roundEndsAt = null;
+      setRoundWinner(null);
     }
 
     async function showGameScreen() {
@@ -438,6 +445,8 @@
       demonIdle: new Image(),
       demonRun1: new Image(),
       demonRun2: new Image(),
+      victoryPursuer: new Image(),
+      victoryFugitive: new Image(),
     };
 
     sprites.idle.src = "character/boy/standing_boy.png";
@@ -453,6 +462,8 @@
     sprites.demonIdle.src = "character/demon/enemy_standing_demon.png";
     sprites.demonRun1.src = "character/demon/enemy_running_demon_1.png";
     sprites.demonRun2.src = "character/demon/enemy_running_demon_2.png";
+    sprites.victoryPursuer.src = "image/victory_Pursuer.png";
+    sprites.victoryFugitive.src = "image/victory_Fugitive.png";
 
     // ワールドの広さ。canvasより大きくして、カメラ追従を作る
     const world = {
@@ -542,7 +553,7 @@
       if (keys["arrowdown"] || keys["s"]) dy += 1;
 
       worldAnimationTime += delta;
-      running = canMove() && (dx !== 0 || dy !== 0);
+      running = canMove() && !roundWinner && (dx !== 0 || dy !== 0);
 
       // 斜め移動が速くなりすぎないよう調整
       if (running) {
@@ -634,7 +645,7 @@
     }
 
     function canMove() {
-      return latestRoomStatus === "playing";
+      return latestRoomStatus === "playing" && !roundWinner;
     }
 
     function isTagGameStarted() {
@@ -930,6 +941,19 @@
         nextMessageY += 52;
       }
 
+      if (latestRoomStatus === "playing" && roundEndsAt && !roundWinner) {
+        const remainingSeconds = Math.max(0, Math.ceil((roundEndsAt - Date.now()) / 1000));
+        const minutes = Math.floor(remainingSeconds / 60);
+        const seconds = String(remainingSeconds % 60).padStart(2, "0");
+        const timerText = `残り ${minutes}:${seconds}`;
+        ctx.font = "bold 46px sans-serif";
+        ctx.fillStyle = "#fff34d";
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+        ctx.strokeText(timerText, canvas.width / 2, nextMessageY);
+        ctx.fillText(timerText, canvas.width / 2, nextMessageY);
+        nextMessageY += 56;
+      }
+
       if (latestRoomStatus === "countdown") {
         const remainingSeconds = countdownEndsAt ? Math.max(0, Math.ceil((countdownEndsAt - Date.now()) / 1000)) : 5;
         ctx.font = "bold 42px sans-serif";
@@ -947,6 +971,51 @@
       ctx.restore();
     }
 
+    function setRoundWinner(winner) {
+      if (roundWinner === winner) return;
+      roundWinner = winner;
+      victoryStartedAt = winner ? performance.now() : null;
+      if (winner) resetMovementInput();
+    }
+
+    function drawVictoryOverlay(now) {
+      if (!roundWinner || !victoryStartedAt) return;
+
+      const image = roundWinner === "pursuer" ? sprites.victoryPursuer : sprites.victoryFugitive;
+      if (!image.complete || image.naturalWidth === 0) return;
+
+      const elapsed = now - victoryStartedAt;
+      const growProgress = Math.min(1, elapsed / 700);
+      const easedGrow = 1 - Math.pow(1 - growProgress, 3);
+      const baseScale = 0.18 + easedGrow * 0.82;
+      const wobble = growProgress >= 1 ? 1 + Math.sin((elapsed - 700) / 120) * 0.08 : 1;
+      const maxWidth = canvas.width * 0.86;
+      const maxHeight = canvas.height * 0.72;
+      const imageRatio = image.naturalWidth / image.naturalHeight;
+      let drawWidth = maxWidth;
+      let drawHeight = drawWidth / imageRatio;
+
+      if (drawHeight > maxHeight) {
+        drawHeight = maxHeight;
+        drawWidth = drawHeight * imageRatio;
+      }
+
+      drawWidth *= baseScale * wobble;
+      drawHeight *= baseScale * wobble;
+
+      ctx.save();
+      ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(
+        image,
+        canvas.width / 2 - drawWidth / 2,
+        canvas.height / 2 - drawHeight / 2,
+        drawWidth,
+        drawHeight,
+      );
+      ctx.restore();
+    }
+
     function loop(now) {
       const delta = Math.min((now - previousTime) / 1000, 0.05);
       previousTime = now;
@@ -954,6 +1023,10 @@
       if (countdownEndsAt && latestRoomStatus === "countdown" && Date.now() >= countdownEndsAt) {
         latestRoomStatus = "playing";
         countdownEndsAt = null;
+      }
+
+      if (roundEndsAt && latestRoomStatus === "playing" && !roundWinner && Date.now() >= roundEndsAt) {
+        setRoundWinner("fugitive");
       }
 
       update(delta);
@@ -968,6 +1041,7 @@
       drawOtherPlayers(camera);
       drawPlayer(camera);
       drawUI();
+      drawVictoryOverlay(now);
 
       requestAnimationFrame(loop);
     }

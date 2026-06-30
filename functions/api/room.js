@@ -2,6 +2,7 @@ const ROOM_TIMEOUT_MS = 1000 * 60 * 60 * 6;
 const PLAYER_TIMEOUT_MS = 1000 * 15;
 const ROOM_CACHE_KEY = "https://tag-game.local/cache/room-state";
 const GAME_COUNTDOWN_MS = 5000;
+const ROUND_DURATION_MS = 1000 * 60 * 3;
 const DEMON_SPAWN_AREA = { x: 2350, y: 1600, width: 300, height: 300 };
 
 const securityHeaders = {
@@ -50,6 +51,8 @@ async function handlePost(request, cache, currentRoom) {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         countdownEndsAt: null,
+        roundEndsAt: null,
+        winner: null,
         players: {},
       };
     }
@@ -64,6 +67,8 @@ async function handlePost(request, cache, currentRoom) {
     clearInactivePlayers(room);
     room.status = "preparing";
     room.countdownEndsAt = null;
+    room.roundEndsAt = null;
+    room.winner = null;
     room.updatedAt = Date.now();
     await mergeLatestRoomState(cache, room);
     await writeRoom(cache, room);
@@ -77,6 +82,8 @@ async function handlePost(request, cache, currentRoom) {
     assignItPlayersForRound(room);
     room.status = "countdown";
     room.countdownEndsAt = Date.now() + GAME_COUNTDOWN_MS;
+    room.roundEndsAt = room.countdownEndsAt + ROUND_DURATION_MS;
+    room.winner = null;
     room.updatedAt = Date.now();
     await writeRoom(cache, room);
     return jsonResponse(getRoomStatus(room));
@@ -127,6 +134,7 @@ async function handlePost(request, cache, currentRoom) {
       room.players[targetId].isIt = true;
       if (room.players[targetId].role !== "demon") room.players[targetId].role = "oni";
       room.players[targetId].updatedAt = Date.now();
+      updateWinner(room);
       room.updatedAt = Date.now();
     }
 
@@ -147,8 +155,12 @@ async function mergeLatestRoomState(cache, room) {
   if (getStatusRank(latestRoom.status) > getStatusRank(room.status)) {
     room.status = latestRoom.status;
     room.countdownEndsAt = latestRoom.countdownEndsAt || null;
-  } else if (latestRoom.status === room.status && latestRoom.countdownEndsAt) {
-    room.countdownEndsAt = latestRoom.countdownEndsAt;
+    room.roundEndsAt = latestRoom.roundEndsAt || null;
+    room.winner = latestRoom.winner || null;
+  } else if (latestRoom.status === room.status) {
+    room.countdownEndsAt = latestRoom.countdownEndsAt || room.countdownEndsAt || null;
+    room.roundEndsAt = latestRoom.roundEndsAt || room.roundEndsAt || null;
+    room.winner = latestRoom.winner || room.winner || null;
   }
 
   for (const [latestPlayerId, latestPlayer] of Object.entries(latestRoom.players || {})) {
@@ -188,6 +200,7 @@ function clearExpiredRoom(room) {
 function getRoomStatus(room) {
   normalizeRoom(room);
   clearInactivePlayers(room);
+  updateWinner(room);
 
   return {
     ok: true,
@@ -195,6 +208,8 @@ function getRoomStatus(room) {
     status: room?.status || "none",
     roomId: room?.id || null,
     countdownEndsAt: room?.countdownEndsAt || null,
+    roundEndsAt: room?.roundEndsAt || null,
+    winner: room?.winner || null,
     demonSpawnArea: room ? DEMON_SPAWN_AREA : null,
     players: room ? Object.values(room.players) : [],
   };
@@ -220,7 +235,27 @@ function normalizeRoom(room) {
     room.updatedAt = Date.now();
   }
 
+  updateWinner(room);
+
   return room;
+}
+
+function updateWinner(room) {
+  if (!room || room.winner || room.status !== "playing") return;
+
+  const players = Object.values(room.players || {});
+  const hasFugitive = players.some((player) => !player.isIt);
+
+  if (!hasFugitive) {
+    room.winner = "pursuer";
+    room.updatedAt = Date.now();
+    return;
+  }
+
+  if (room.roundEndsAt && Date.now() >= room.roundEndsAt) {
+    room.winner = "fugitive";
+    room.updatedAt = Date.now();
+  }
 }
 
 function normalizePlayerRole(role) {
