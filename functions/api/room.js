@@ -22,9 +22,15 @@ export async function onRequest(context) {
   if (savedRoom && !room) await deleteRoom(cache);
 
   switch (context.request.method) {
-    case "GET":
+    case "GET": {
+      const roomStatus = getRoomStatus(room);
+      if (room?.winner && Object.keys(room.players).length === 0) {
+        await deleteRoom(cache);
+        return jsonResponse(getRoomStatus(null));
+      }
       if (room) await writeRoom(cache, room);
-      return jsonResponse(getRoomStatus(room));
+      return jsonResponse(roomStatus);
+    }
     case "POST":
       return handlePost(context.request, cache, room);
     case "DELETE":
@@ -100,8 +106,15 @@ async function handlePost(request, cache, currentRoom) {
 
     const playerId = sanitizePlayerId(body.playerId);
     if (!playerId) return jsonResponse({ ok: false, error: "プレイヤーIDが不正です。" }, 400);
+    if (room.winner && !room.players[playerId]) {
+      return jsonResponse({ ok: false, error: "ゲーム終了後は入室できません。" }, 403);
+    }
 
     clearInactivePlayers(room);
+    if (room.winner && Object.keys(room.players).length === 0) {
+      await deleteRoom(cache);
+      return jsonResponse(getRoomStatus(null));
+    }
     await mergeLatestRoomState(cache, room);
 
     const existingPlayer = room.players[playerId];
@@ -125,6 +138,24 @@ async function handlePost(request, cache, currentRoom) {
     room.updatedAt = Date.now();
     await writeRoom(cache, room);
 
+    return jsonResponse(getRoomStatus(room));
+  }
+
+  if (body.action === "leave") {
+    if (!room) return jsonResponse(getRoomStatus(null));
+
+    const playerId = sanitizePlayerId(body.playerId);
+    if (!playerId) return jsonResponse({ ok: false, error: "プレイヤーIDが不正です。" }, 400);
+
+    delete room.players[playerId];
+    room.updatedAt = Date.now();
+
+    if (room.winner && Object.keys(room.players).length === 0) {
+      await deleteRoom(cache);
+      return jsonResponse(getRoomStatus(null));
+    }
+
+    await writeRoom(cache, room);
     return jsonResponse(getRoomStatus(room));
   }
 
@@ -208,10 +239,6 @@ function clearExpiredRoom(room) {
   if (!room) return null;
 
   const now = Date.now();
-
-  if (room.deleteAt && now >= room.deleteAt) {
-    return null;
-  }
 
   if (now - room.updatedAt > ROOM_TIMEOUT_MS) {
     return null;

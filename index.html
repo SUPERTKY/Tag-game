@@ -228,6 +228,7 @@
     let pendingWinner = null;
     let announcedWinner = null;
     let resultAudioPlayedFor = null;
+    let resultExitTimerId = null;
     const previousItPlayerIds = new Set();
     const activeExplosionEffects = new Map();
     const explosionDurationMs = 1500;
@@ -286,6 +287,10 @@
       }
 
       if (roomStatus.status === "preparing" || roomStatus.status === "playing" || roomStatus.status === "countdown") {
+        if (roomStatus.winner) {
+          setMatchingMessage("部屋があります。ゲーム開始まで待機してください。");
+          return;
+        }
         await showGameScreen();
         return;
       }
@@ -351,8 +356,7 @@
         adminPlayerCount.textContent = `${playerCountText} / 部屋なし`;
       } else if (roomStatus.winner) {
         const winnerText = roomStatus.winner === "pursuer" ? "鬼側の勝利" : "逃亡者側の勝利";
-        const deleteInSeconds = roomStatus.deleteAt ? Math.max(0, Math.ceil((roomStatus.deleteAt - Date.now()) / 1000)) : 10;
-        adminPlayerCount.textContent = `${playerCountText} / ${winnerText} / ${deleteInSeconds}秒後に部屋を削除`;
+        adminPlayerCount.textContent = `${playerCountText} / ${winnerText} / 全員退室後に部屋を削除`;
       } else {
         adminPlayerCount.textContent = playerCountText;
       }
@@ -378,6 +382,10 @@
       pendingWinner = null;
       announcedWinner = null;
       resultAudioPlayedFor = null;
+      if (resultExitTimerId !== null) {
+        window.clearTimeout(resultExitTimerId);
+        resultExitTimerId = null;
+      }
     }
 
     async function showGameScreen() {
@@ -1025,6 +1033,27 @@
       if (resultAudioPlayedFor !== winner) {
         resultAudioPlayedFor = winner;
         playSound(isCurrentPlayerWinner(winner) ? victorySound : lossSound);
+      }
+      scheduleResultExit();
+    }
+
+    function scheduleResultExit() {
+      if (!gameJoined || resultExitTimerId !== null) return;
+
+      resultExitTimerId = window.setTimeout(async () => {
+        resultExitTimerId = null;
+        await leaveRoomAfterResult();
+      }, 10000);
+    }
+
+    async function leaveRoomAfterResult() {
+      if (!gameJoined) return;
+
+      try {
+        await updateRoom("POST", { action: "leave", playerId });
+      } finally {
+        setMatchingMessage("ゲーム終了により退室しました。");
+        showWaitScreen();
       }
     }
 
