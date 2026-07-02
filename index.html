@@ -341,8 +341,8 @@
       latestRoomStatus = roomStatus.status || "none";
       countdownEndsAt = roomStatus.countdownEndsAt || null;
       roundEndsAt = roomStatus.roundEndsAt || null;
-      setRoundWinner(roomStatus.winner || null);
       updateLatestPlayers(roomStatus.players || []);
+      setRoundWinner(roomStatus.winner || null);
       syncCurrentPlayerPosition();
       updateRoomControls(roomStatus);
       syncScreenWithRoom(roomStatus);
@@ -708,7 +708,11 @@
         playerId,
         targetId,
       });
+      latestRoomStatus = roomStatus.status || latestRoomStatus;
+      countdownEndsAt = roomStatus.countdownEndsAt || null;
+      roundEndsAt = roomStatus.roundEndsAt || null;
       updateLatestPlayers(roomStatus.players || latestPlayers);
+      setRoundWinner(roomStatus.winner || null);
     }
 
     function updateTagCollisions() {
