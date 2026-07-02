@@ -219,6 +219,9 @@
     let teacherMode = false;
     let lastPlayerSyncAt = 0;
     let playerSyncInFlight = false;
+    const playerSyncIntervalMs = 500;
+    const remoteInterpolationDelayMs = 550;
+    const renderedPlayers = new Map();
     let latestRoomStatus = "none";
     let countdownEndsAt = null;
     let roundEndsAt = null;
@@ -377,6 +380,7 @@
       teacherMode = false;
       activeExplosionEffects.clear();
       previousItPlayerIds.clear();
+      renderedPlayers.clear();
       roundEndsAt = null;
       setRoundWinner(null);
       pendingWinner = null;
@@ -748,8 +752,36 @@
         }
       }
 
+      for (const renderedPlayerId of renderedPlayers.keys()) {
+        if (!currentPlayerIds.has(renderedPlayerId)) renderedPlayers.delete(renderedPlayerId);
+      }
+
+      for (const otherPlayer of players) {
+        if (otherPlayer.id === playerId) continue;
+        const previousRender = renderedPlayers.get(otherPlayer.id);
+        const from = previousRender ? getInterpolatedRenderPlayer(previousRender, now) : otherPlayer;
+        renderedPlayers.set(otherPlayer.id, {
+          ...otherPlayer,
+          fromX: from.x,
+          fromY: from.y,
+          targetX: otherPlayer.x,
+          targetY: otherPlayer.y,
+          receivedAt: now,
+        });
+      }
+
       latestPlayers = players;
       syncCurrentPlayerPosition();
+    }
+
+    function getInterpolatedRenderPlayer(renderPlayer, now = performance.now()) {
+      const progress = Math.min(1, Math.max(0, (now - renderPlayer.receivedAt) / remoteInterpolationDelayMs));
+      const easedProgress = progress * progress * (3 - 2 * progress);
+      return {
+        ...renderPlayer,
+        x: renderPlayer.fromX + (renderPlayer.targetX - renderPlayer.fromX) * easedProgress,
+        y: renderPlayer.fromY + (renderPlayer.targetY - renderPlayer.fromY) * easedProgress,
+      };
     }
 
     function startExplosionEffect(effectPlayerId, now) {
@@ -873,20 +905,24 @@
 
 
     function drawOtherPlayers(camera) {
+      const now = performance.now();
       for (const otherPlayer of latestPlayers) {
         if (otherPlayer.id === playerId) continue;
 
+        const renderPlayer = renderedPlayers.has(otherPlayer.id)
+          ? getInterpolatedRenderPlayer(renderedPlayers.get(otherPlayer.id), now)
+          : otherPlayer;
         const explosionStartTime = getActiveExplosionStart(otherPlayer.id);
         if (explosionStartTime !== null) {
-          drawExplosionEffect(explosionStartTime, camera, otherPlayer.x, otherPlayer.y, otherPlayer.role);
+          drawExplosionEffect(explosionStartTime, camera, renderPlayer.x, renderPlayer.y, otherPlayer.role);
           continue;
         }
 
         const image = getPlayerImage(otherPlayer.isIt, otherPlayer.running, otherPlayer.role);
         drawPlayerSprite(
           image,
-          otherPlayer.x - camera.x,
-          otherPlayer.y - camera.y,
+          renderPlayer.x - camera.x,
+          renderPlayer.y - camera.y,
           otherPlayer.facing === -1 ? -1 : 1,
           otherPlayer.role,
         );
@@ -1059,7 +1095,8 @@
 
     function isCurrentPlayerWinner(winner) {
       const currentPlayer = getCurrentPlayerState();
-      return winner === "pursuer" ? Boolean(currentPlayer?.pursuerWinnerEligible) : !isCurrentPlayerIt();
+      if (!currentPlayer) return false;
+      return winner === "pursuer" ? Boolean(currentPlayer.pursuerWinnerEligible) : !currentPlayer.isIt;
     }
 
     function playSound(sound) {
@@ -1154,7 +1191,7 @@
 
       update(delta);
 
-      if (gameJoined && canvas.style.display === "block" && now - lastPlayerSyncAt > 200) {
+      if (gameJoined && canvas.style.display === "block" && now - lastPlayerSyncAt > playerSyncIntervalMs) {
         lastPlayerSyncAt = now;
         sendPlayerState();
       }
