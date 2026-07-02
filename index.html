@@ -219,17 +219,31 @@
     let teacherMode = false;
     let lastPlayerSyncAt = 0;
     let playerSyncInFlight = false;
+    const playerSyncIntervalMs = 500;
+    const remoteInterpolationDelayMs = 550;
+    const renderedPlayers = new Map();
     let latestRoomStatus = "none";
     let countdownEndsAt = null;
     let roundEndsAt = null;
     let roundWinner = null;
-    let victoryStartedAt = null;
+    let resultStartedAt = null;
+    let gameEndStartedAt = null;
+    let pendingWinner = null;
+    let announcedWinner = null;
+    let resultAudioPlayedFor = null;
+    let resultExitTimerId = null;
     const previousItPlayerIds = new Set();
     const activeExplosionEffects = new Map();
     const explosionDurationMs = 1500;
     const explosionFrameDurationMs = 150;
     const explosionSound = new Audio("Sound/explosion.mp3");
     explosionSound.preload = "auto";
+    const endGameSound = new Audio("Sound/end_game.mp3");
+    endGameSound.preload = "auto";
+    const victorySound = new Audio("Sound/victory.mp3");
+    victorySound.preload = "auto";
+    const lossSound = new Audio("Sound/Loss.mp3");
+    lossSound.preload = "auto";
 
     teacherButton.addEventListener("click", async () => {
       const password = window.prompt("先生パスワードを入力してください");
@@ -276,6 +290,10 @@
       }
 
       if (roomStatus.status === "preparing" || roomStatus.status === "playing" || roomStatus.status === "countdown") {
+        if (roomStatus.winner) {
+          setMatchingMessage("部屋があります。ゲーム開始まで待機してください。");
+          return;
+        }
         await showGameScreen();
         return;
       }
@@ -299,17 +317,11 @@
     startGameButton.addEventListener("click", async () => {
       const roomStatus = await updateRoom("POST", { action: "start" });
       updateRoomControls(roomStatus);
-      if (roomStatus.exists && roomStatus.status === "preparing") {
-        setMatchingMessage("ゲームを開始しました。参加者はフィールドで待機できます。");
-      }
     });
 
     taggameStartButton.addEventListener("click", async () => {
       const roomStatus = await updateRoom("POST", { action: "startTagGame" });
       updateRoomControls(roomStatus);
-      if (roomStatus.exists && roomStatus.status === "countdown") {
-        setMatchingMessage("鬼ごっこを開始します。鬼を配置し、5秒後に動けます。");
-      }
     });
 
     async function updateRoom(method, body) {
@@ -342,7 +354,15 @@
       releaseRoomButton.classList.toggle("visible", roomExists);
       startGameButton.classList.toggle("visible", roomExists && roomStatus.status === "waiting");
       taggameStartButton.classList.toggle("visible", roomExists && roomStatus.status === "preparing");
-      adminPlayerCount.textContent = `参加人数: ${(roomStatus.players || []).length}人`;
+      const playerCountText = `参加人数: ${(roomStatus.players || []).length}人`;
+      if (!roomExists) {
+        adminPlayerCount.textContent = `${playerCountText} / 部屋なし`;
+      } else if (roomStatus.winner) {
+        const winnerText = roomStatus.winner === "pursuer" ? "鬼側の勝利" : "逃亡者側の勝利";
+        adminPlayerCount.textContent = `${playerCountText} / ${winnerText} / 全員退室後に部屋を削除`;
+      } else {
+        adminPlayerCount.textContent = playerCountText;
+      }
     }
 
     function setMatchingMessage(message) {
@@ -360,8 +380,16 @@
       teacherMode = false;
       activeExplosionEffects.clear();
       previousItPlayerIds.clear();
+      renderedPlayers.clear();
       roundEndsAt = null;
       setRoundWinner(null);
+      pendingWinner = null;
+      announcedWinner = null;
+      resultAudioPlayedFor = null;
+      if (resultExitTimerId !== null) {
+        window.clearTimeout(resultExitTimerId);
+        resultExitTimerId = null;
+      }
     }
 
     async function showGameScreen() {
@@ -387,8 +415,8 @@
         return;
       }
 
-      if ((roomStatus.status === "preparing" || roomStatus.status === "playing" || roomStatus.status === "countdown") && waitScreen.style.display !== "none") {
-        setMatchingMessage("ゲームは開始中です。参加する場合はマッチング開始を押してください。");
+      if (roomStatus.exists && waitScreen.style.display !== "none") {
+        setMatchingMessage("部屋があります。ゲーム開始まで待機してください。");
       }
     }
 
@@ -447,6 +475,8 @@
       demonRun2: new Image(),
       victoryPursuer: new Image(),
       victoryFugitive: new Image(),
+      loss: new Image(),
+      gameEnd: new Image(),
     };
 
     sprites.idle.src = "character/boy/standing_boy.png";
@@ -464,6 +494,8 @@
     sprites.demonRun2.src = "character/demon/enemy_running_demon_2.png";
     sprites.victoryPursuer.src = "image/victory_Pursuer.png";
     sprites.victoryFugitive.src = "image/victory_Fugitive.png";
+    sprites.loss.src = "image/Loss.png";
+    sprites.gameEnd.src = "image/game_end.png";
 
     // ワールドの広さ。canvasより大きくして、カメラ追従を作る
     const world = {
@@ -720,8 +752,36 @@
         }
       }
 
+      for (const renderedPlayerId of renderedPlayers.keys()) {
+        if (!currentPlayerIds.has(renderedPlayerId)) renderedPlayers.delete(renderedPlayerId);
+      }
+
+      for (const otherPlayer of players) {
+        if (otherPlayer.id === playerId) continue;
+        const previousRender = renderedPlayers.get(otherPlayer.id);
+        const from = previousRender ? getInterpolatedRenderPlayer(previousRender, now) : otherPlayer;
+        renderedPlayers.set(otherPlayer.id, {
+          ...otherPlayer,
+          fromX: from.x,
+          fromY: from.y,
+          targetX: otherPlayer.x,
+          targetY: otherPlayer.y,
+          receivedAt: now,
+        });
+      }
+
       latestPlayers = players;
       syncCurrentPlayerPosition();
+    }
+
+    function getInterpolatedRenderPlayer(renderPlayer, now = performance.now()) {
+      const progress = Math.min(1, Math.max(0, (now - renderPlayer.receivedAt) / remoteInterpolationDelayMs));
+      const easedProgress = progress * progress * (3 - 2 * progress);
+      return {
+        ...renderPlayer,
+        x: renderPlayer.fromX + (renderPlayer.targetX - renderPlayer.fromX) * easedProgress,
+        y: renderPlayer.fromY + (renderPlayer.targetY - renderPlayer.fromY) * easedProgress,
+      };
     }
 
     function startExplosionEffect(effectPlayerId, now) {
@@ -845,20 +905,24 @@
 
 
     function drawOtherPlayers(camera) {
+      const now = performance.now();
       for (const otherPlayer of latestPlayers) {
         if (otherPlayer.id === playerId) continue;
 
+        const renderPlayer = renderedPlayers.has(otherPlayer.id)
+          ? getInterpolatedRenderPlayer(renderedPlayers.get(otherPlayer.id), now)
+          : otherPlayer;
         const explosionStartTime = getActiveExplosionStart(otherPlayer.id);
         if (explosionStartTime !== null) {
-          drawExplosionEffect(explosionStartTime, camera, otherPlayer.x, otherPlayer.y, otherPlayer.role);
+          drawExplosionEffect(explosionStartTime, camera, renderPlayer.x, renderPlayer.y, otherPlayer.role);
           continue;
         }
 
         const image = getPlayerImage(otherPlayer.isIt, otherPlayer.running, otherPlayer.role);
         drawPlayerSprite(
           image,
-          otherPlayer.x - camera.x,
-          otherPlayer.y - camera.y,
+          renderPlayer.x - camera.x,
+          renderPlayer.y - camera.y,
           otherPlayer.facing === -1 ? -1 : 1,
           otherPlayer.role,
         );
@@ -972,23 +1036,96 @@
     }
 
     function setRoundWinner(winner) {
-      if (roundWinner === winner) return;
-      roundWinner = winner;
-      victoryStartedAt = winner ? performance.now() : null;
-      if (winner) resetMovementInput();
+      if (pendingWinner === winner || roundWinner === winner) return;
+
+      if (!winner) {
+        roundWinner = null;
+        pendingWinner = null;
+        announcedWinner = null;
+        resultStartedAt = null;
+        gameEndStartedAt = null;
+        resultAudioPlayedFor = null;
+        return;
+      }
+
+      pendingWinner = winner;
+      roundWinner = null;
+      gameEndStartedAt = performance.now();
+      resultStartedAt = null;
+      resetMovementInput();
+      playSound(endGameSound);
+      waitForSoundToFinish(endGameSound, () => {
+        window.setTimeout(() => {
+          if (pendingWinner !== winner || roundWinner) return;
+          announceRoundWinner(winner);
+        }, 2000);
+      });
     }
 
-    function drawVictoryOverlay(now) {
-      if (!roundWinner || !victoryStartedAt) return;
+    function announceRoundWinner(winner) {
+      roundWinner = winner;
+      announcedWinner = winner;
+      resultStartedAt = performance.now();
+      if (resultAudioPlayedFor !== winner) {
+        resultAudioPlayedFor = winner;
+        playSound(isCurrentPlayerWinner(winner) ? victorySound : lossSound);
+      }
+      scheduleResultExit();
+    }
 
-      const image = roundWinner === "pursuer" ? sprites.victoryPursuer : sprites.victoryFugitive;
+    function scheduleResultExit() {
+      if (!gameJoined || resultExitTimerId !== null) return;
+
+      resultExitTimerId = window.setTimeout(async () => {
+        resultExitTimerId = null;
+        await leaveRoomAfterResult();
+      }, 10000);
+    }
+
+    async function leaveRoomAfterResult() {
+      if (!gameJoined) return;
+
+      try {
+        await updateRoom("POST", { action: "leave", playerId });
+      } finally {
+        setMatchingMessage("ゲーム終了により退室しました。");
+        showWaitScreen();
+      }
+    }
+
+    function isCurrentPlayerWinner(winner) {
+      const currentPlayer = getCurrentPlayerState();
+      if (!currentPlayer) return false;
+      return winner === "pursuer" ? Boolean(currentPlayer.pursuerWinnerEligible) : !currentPlayer.isIt;
+    }
+
+    function playSound(sound) {
+      try {
+        sound.currentTime = 0;
+        const playPromise = sound.play();
+        if (playPromise) playPromise.catch(() => {});
+      } catch {
+        // ブラウザの自動再生制限などで再生できない場合は、演出だけ続ける
+      }
+    }
+
+    function waitForSoundToFinish(sound, callback) {
+      let completed = false;
+      const finish = () => {
+        if (completed) return;
+        completed = true;
+        sound.removeEventListener("ended", finish);
+        callback();
+      };
+
+      sound.addEventListener("ended", finish, { once: true });
+      const fallbackDelayMs = Number.isFinite(sound.duration) && sound.duration > 0 ? sound.duration * 1000 + 250 : 3000;
+      window.setTimeout(finish, fallbackDelayMs);
+    }
+
+    function drawCenteredOverlayImage(image, scale) {
       if (!image.complete || image.naturalWidth === 0) return;
 
-      const elapsed = now - victoryStartedAt;
-      const growProgress = Math.min(1, elapsed / 700);
-      const easedGrow = 1 - Math.pow(1 - growProgress, 3);
-      const baseScale = 0.18 + easedGrow * 0.82;
-      const wobble = growProgress >= 1 ? 1 + Math.sin((elapsed - 700) / 120) * 0.08 : 1;
       const maxWidth = canvas.width * 0.86;
       const maxHeight = canvas.height * 0.72;
       const imageRatio = image.naturalWidth / image.naturalHeight;
@@ -1000,19 +1137,42 @@
         drawWidth = drawHeight * imageRatio;
       }
 
-      drawWidth *= baseScale * wobble;
-      drawHeight *= baseScale * wobble;
+      drawWidth *= scale;
+      drawHeight *= scale;
+      ctx.drawImage(image, canvas.width / 2 - drawWidth / 2, canvas.height / 2 - drawHeight / 2, drawWidth, drawHeight);
+    }
+
+    function drawGameEndOverlay(now) {
+      if (!pendingWinner || roundWinner || !gameEndStartedAt) return;
+
+      const elapsed = now - gameEndStartedAt;
+      const growProgress = Math.min(1, elapsed / 260);
+      const easedGrow = 1 - Math.pow(1 - growProgress, 4);
+      const scale = 0.12 + easedGrow * 0.88;
 
       ctx.save();
       ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(
-        image,
-        canvas.width / 2 - drawWidth / 2,
-        canvas.height / 2 - drawHeight / 2,
-        drawWidth,
-        drawHeight,
-      );
+      drawCenteredOverlayImage(sprites.gameEnd, scale);
+      ctx.restore();
+    }
+
+    function drawVictoryOverlay(now) {
+      if (!roundWinner || !resultStartedAt) return;
+
+      const image = isCurrentPlayerWinner(roundWinner)
+        ? (roundWinner === "pursuer" ? sprites.victoryPursuer : sprites.victoryFugitive)
+        : sprites.loss;
+
+      const elapsed = now - resultStartedAt;
+      const growProgress = Math.min(1, elapsed / 700);
+      const easedGrow = 1 - Math.pow(1 - growProgress, 3);
+      const scale = 0.18 + easedGrow * 0.82;
+
+      ctx.save();
+      ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      drawCenteredOverlayImage(image, scale);
       ctx.restore();
     }
 
@@ -1031,7 +1191,7 @@
 
       update(delta);
 
-      if (gameJoined && canvas.style.display === "block" && now - lastPlayerSyncAt > 200) {
+      if (gameJoined && canvas.style.display === "block" && now - lastPlayerSyncAt > playerSyncIntervalMs) {
         lastPlayerSyncAt = now;
         sendPlayerState();
       }
@@ -1041,6 +1201,7 @@
       drawOtherPlayers(camera);
       drawPlayer(camera);
       drawUI();
+      drawGameEndOverlay(now);
       drawVictoryOverlay(now);
 
       requestAnimationFrame(loop);
