@@ -231,6 +231,7 @@
     let pendingWinner = null;
     let announcedWinner = null;
     let resultAudioPlayedFor = null;
+    let resultIsCurrentPlayerWinner = false;
     let resultExitTimerId = null;
     const previousItPlayerIds = new Set();
     const activeExplosionEffects = new Map();
@@ -386,6 +387,8 @@
       pendingWinner = null;
       announcedWinner = null;
       resultAudioPlayedFor = null;
+      resultIsCurrentPlayerWinner = false;
+      stopResultSounds();
       if (resultExitTimerId !== null) {
         window.clearTimeout(resultExitTimerId);
         resultExitTimerId = null;
@@ -1045,6 +1048,8 @@
         resultStartedAt = null;
         gameEndStartedAt = null;
         resultAudioPlayedFor = null;
+        resultIsCurrentPlayerWinner = false;
+        stopResultSounds();
         return;
       }
 
@@ -1053,6 +1058,7 @@
       gameEndStartedAt = performance.now();
       resultStartedAt = null;
       resetMovementInput();
+      stopResultSounds();
       playSound(endGameSound);
       waitForSoundToFinish(endGameSound, () => {
         window.setTimeout(() => {
@@ -1066,9 +1072,11 @@
       roundWinner = winner;
       announcedWinner = winner;
       resultStartedAt = performance.now();
+      resultIsCurrentPlayerWinner = isCurrentPlayerWinner(winner);
+      stopSound(endGameSound);
       if (resultAudioPlayedFor !== winner) {
         resultAudioPlayedFor = winner;
-        playSound(isCurrentPlayerWinner(winner) ? victorySound : lossSound);
+        playSound(resultIsCurrentPlayerWinner ? victorySound : lossSound);
       }
       scheduleResultExit();
     }
@@ -1097,6 +1105,21 @@
       const currentPlayer = getCurrentPlayerState();
       if (!currentPlayer) return false;
       return winner === "pursuer" ? Boolean(currentPlayer.pursuerWinnerEligible) : !currentPlayer.isIt;
+    }
+
+    function stopSound(sound) {
+      try {
+        sound.pause();
+        sound.currentTime = 0;
+      } catch {
+        // 音声要素の状態によって停止できない場合は無視する
+      }
+    }
+
+    function stopResultSounds() {
+      stopSound(endGameSound);
+      stopSound(victorySound);
+      stopSound(lossSound);
     }
 
     function playSound(sound) {
@@ -1160,7 +1183,7 @@
     function drawVictoryOverlay(now) {
       if (!roundWinner || !resultStartedAt) return;
 
-      const image = isCurrentPlayerWinner(roundWinner)
+      const image = resultIsCurrentPlayerWinner
         ? (roundWinner === "pursuer" ? sprites.victoryPursuer : sprites.victoryFugitive)
         : sprites.loss;
 
