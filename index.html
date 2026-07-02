@@ -309,17 +309,11 @@
     startGameButton.addEventListener("click", async () => {
       const roomStatus = await updateRoom("POST", { action: "start" });
       updateRoomControls(roomStatus);
-      if (roomStatus.exists && roomStatus.status === "preparing") {
-        setMatchingMessage("ゲームを開始しました。参加者はフィールドで待機できます。");
-      }
     });
 
     taggameStartButton.addEventListener("click", async () => {
       const roomStatus = await updateRoom("POST", { action: "startTagGame" });
       updateRoomControls(roomStatus);
-      if (roomStatus.exists && roomStatus.status === "countdown") {
-        setMatchingMessage("鬼ごっこを開始します。鬼を配置し、5秒後に動けます。");
-      }
     });
 
     async function updateRoom(method, body) {
@@ -409,8 +403,8 @@
         return;
       }
 
-      if ((roomStatus.status === "preparing" || roomStatus.status === "playing" || roomStatus.status === "countdown") && waitScreen.style.display !== "none") {
-        setMatchingMessage("ゲームは開始中です。参加する場合はマッチング開始を押してください。");
+      if (roomStatus.exists && waitScreen.style.display !== "none") {
+        setMatchingMessage("部屋があります。ゲーム開始まで待機してください。");
       }
     }
 
@@ -1035,7 +1029,8 @@
     }
 
     function isCurrentPlayerWinner(winner) {
-      return winner === "pursuer" ? isCurrentPlayerIt() : !isCurrentPlayerIt();
+      const currentPlayer = getCurrentPlayerState();
+      return winner === "pursuer" ? Boolean(currentPlayer?.pursuerWinnerEligible) : !isCurrentPlayerIt();
     }
 
     function playSound(sound) {

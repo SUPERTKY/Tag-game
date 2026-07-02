@@ -118,6 +118,8 @@ async function handlePost(request, cache, currentRoom) {
       running: room.status === "playing" ? Boolean(body.running) : false,
       isIt,
       role,
+      startedAsIt: Boolean(existingPlayer?.startedAsIt || (isRoundStarted(room.status) && isItRole(role))),
+      tagCount: clampNumber(existingPlayer?.tagCount, 0, Number.MAX_SAFE_INTEGER),
       updatedAt: Date.now(),
     };
     room.updatedAt = Date.now();
@@ -136,10 +138,15 @@ async function handlePost(request, cache, currentRoom) {
     clearInactivePlayers(room);
     await mergeLatestRoomState(cache, room);
 
-    if (room.status === "playing" && room.players[taggerId]?.isIt && room.players[targetId]) {
-      room.players[targetId].isIt = true;
-      if (room.players[targetId].role !== "demon") room.players[targetId].role = "oni";
-      room.players[targetId].updatedAt = Date.now();
+    const tagger = room.players[taggerId];
+    const target = room.players[targetId];
+    if (room.status === "playing" && tagger?.isIt && target && !target.isIt) {
+      tagger.tagCount = clampNumber(tagger.tagCount, 0, Number.MAX_SAFE_INTEGER) + 1;
+      target.isIt = true;
+      if (target.role !== "demon") target.role = "oni";
+      target.startedAsIt = Boolean(target.startedAsIt);
+      target.tagCount = clampNumber(target.tagCount, 0, Number.MAX_SAFE_INTEGER);
+      target.updatedAt = Date.now();
       updateWinner(room);
       room.updatedAt = Date.now();
     }
@@ -176,6 +183,8 @@ async function mergeLatestRoomState(cache, room) {
     if (!player || !latestPlayer.isIt) continue;
 
     player.isIt = true;
+    player.startedAsIt = Boolean(player.startedAsIt || latestPlayer.startedAsIt);
+    player.tagCount = Math.max(clampNumber(player.tagCount, 0, Number.MAX_SAFE_INTEGER), clampNumber(latestPlayer.tagCount, 0, Number.MAX_SAFE_INTEGER));
     if (isItRole(latestPlayer.role)) player.role = latestPlayer.role;
   }
 }
@@ -226,7 +235,16 @@ function getRoomStatus(room) {
     winner: room?.winner || null,
     deleteAt: room?.deleteAt || null,
     demonSpawnArea: room ? DEMON_SPAWN_AREA : null,
-    players: room ? Object.values(room.players) : [],
+    players: room ? Object.values(room.players).map(serializePlayer) : [],
+  };
+}
+
+function serializePlayer(player) {
+  return {
+    ...player,
+    tagCount: clampNumber(player.tagCount, 0, Number.MAX_SAFE_INTEGER),
+    startedAsIt: Boolean(player.startedAsIt),
+    pursuerWinnerEligible: Boolean(player.startedAsIt || clampNumber(player.tagCount, 0, Number.MAX_SAFE_INTEGER) >= 3),
   };
 }
 
@@ -295,10 +313,13 @@ function assignItPlayersForRound(room) {
   for (const player of players) {
     if (player.role === "demon") {
       player.isIt = true;
+      player.startedAsIt = true;
     } else {
       player.role = "player";
       player.isIt = false;
+      player.startedAsIt = false;
     }
+    player.tagCount = 0;
   }
 
   const candidates = shufflePlayers(players.filter((player) => !player.isIt));
@@ -307,6 +328,8 @@ function assignItPlayersForRound(room) {
     if (currentItCount >= targetItCount) break;
     player.isIt = true;
     player.role = "oni";
+    player.startedAsIt = true;
+    player.tagCount = 0;
     currentItCount += 1;
   }
 
