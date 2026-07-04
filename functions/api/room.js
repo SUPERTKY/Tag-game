@@ -119,6 +119,10 @@ async function handlePost(request, cache, currentRoom) {
 
     const existingPlayer = room.players[playerId];
     const requestedRole = normalizePlayerRole(body.role);
+    const nextSeq = clampNumber(body.seq, 0, Number.MAX_SAFE_INTEGER);
+    if (body.action === "updatePlayer" && existingPlayer?.seq && nextSeq && nextSeq < existingPlayer.seq) {
+      return jsonResponse(getRoomStatus(room));
+    }
     const role = isItRole(existingPlayer?.role) ? existingPlayer.role : requestedRole;
     const isIt = Boolean(existingPlayer?.isIt || (isRoundStarted(room.status) && isItRole(role)));
     const frozenItSpawn = room.status === "countdown" && isIt;
@@ -135,6 +139,7 @@ async function handlePost(request, cache, currentRoom) {
       startedAsIt: Boolean(existingPlayer?.startedAsIt || joinedRoundAsIt),
       tagCount: clampNumber(existingPlayer?.tagCount, 0, Number.MAX_SAFE_INTEGER),
       updatedAt: Date.now(),
+      seq: Math.max(clampNumber(existingPlayer?.seq, 0, Number.MAX_SAFE_INTEGER), nextSeq),
     };
     room.updatedAt = Date.now();
     await writeRoom(cache, room);
@@ -212,7 +217,23 @@ async function mergeLatestRoomState(cache, room) {
 
   for (const [latestPlayerId, latestPlayer] of Object.entries(latestRoom.players || {})) {
     const player = room.players[latestPlayerId];
-    if (!player || !latestPlayer.isIt) continue;
+    if (!player) {
+      room.players[latestPlayerId] = latestPlayer;
+      continue;
+    }
+
+    if (clampNumber(latestPlayer.seq, 0, Number.MAX_SAFE_INTEGER) > clampNumber(player.seq, 0, Number.MAX_SAFE_INTEGER)) {
+      room.players[latestPlayerId] = {
+        ...latestPlayer,
+        isIt: Boolean(player.isIt || latestPlayer.isIt),
+        startedAsIt: Boolean(player.startedAsIt || latestPlayer.startedAsIt),
+        tagCount: Math.max(clampNumber(player.tagCount, 0, Number.MAX_SAFE_INTEGER), clampNumber(latestPlayer.tagCount, 0, Number.MAX_SAFE_INTEGER)),
+        role: isItRole(player.role) ? player.role : latestPlayer.role,
+      };
+      continue;
+    }
+
+    if (!latestPlayer.isIt) continue;
 
     player.isIt = true;
     player.startedAsIt = Boolean(player.startedAsIt || latestPlayer.startedAsIt);
