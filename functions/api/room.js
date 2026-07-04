@@ -122,6 +122,7 @@ async function handlePost(request, cache, currentRoom) {
     const role = isItRole(existingPlayer?.role) ? existingPlayer.role : requestedRole;
     const isIt = Boolean(existingPlayer?.isIt || (isRoundStarted(room.status) && isItRole(role)));
     const frozenItSpawn = room.status === "countdown" && isIt;
+    const joinedRoundAsIt = !existingPlayer && isRoundStarted(room.status) && isItRole(role);
 
     room.players[playerId] = {
       id: playerId,
@@ -131,7 +132,7 @@ async function handlePost(request, cache, currentRoom) {
       running: room.status === "playing" ? Boolean(body.running) : false,
       isIt,
       role,
-      startedAsIt: Boolean(existingPlayer?.startedAsIt || (isRoundStarted(room.status) && isItRole(role))),
+      startedAsIt: Boolean(existingPlayer?.startedAsIt || joinedRoundAsIt),
       tagCount: clampNumber(existingPlayer?.tagCount, 0, Number.MAX_SAFE_INTEGER),
       updatedAt: Date.now(),
     };
