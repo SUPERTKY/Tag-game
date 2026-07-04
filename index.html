@@ -219,8 +219,11 @@
     let teacherMode = false;
     let lastPlayerSyncAt = 0;
     let playerSyncInFlight = false;
-    const playerSyncIntervalMs = 500;
-    const remoteInterpolationDelayMs = 550;
+    let lastSyncedPlayerState = null;
+    const playerSyncIntervalMs = 100;
+    const playerIdleSyncIntervalMs = 500;
+    const playerSyncMinMovement = 1.5;
+    const remoteInterpolationDelayMs = 140;
     const renderedPlayers = new Map();
     let latestRoomStatus = "none";
     let countdownEndsAt = null;
@@ -446,6 +449,9 @@
     async function sendPlayerState(action = "updatePlayer") {
       if (playerSyncInFlight) return null;
 
+      const playerState = getOutgoingPlayerState(action);
+      if (action === "updatePlayer" && !shouldSendPlayerState(playerState)) return null;
+
       playerSyncInFlight = true;
 
       try {
@@ -459,12 +465,35 @@
           worldWidth: world.width,
           worldHeight: world.height,
           role: teacherMode ? "demon" : "player",
+          seq: playerState.seq,
         });
+        lastSyncedPlayerState = playerState;
         updateLatestPlayers(roomStatus.players || []);
         return roomStatus;
       } finally {
         playerSyncInFlight = false;
       }
+    }
+
+    function getOutgoingPlayerState(action) {
+      return {
+        action,
+        x: player.x,
+        y: player.y,
+        facing: player.idleFacing,
+        running,
+        role: teacherMode ? "demon" : "player",
+        seq: Date.now(),
+      };
+    }
+
+    function shouldSendPlayerState(playerState) {
+      if (!lastSyncedPlayerState) return true;
+      if (running !== lastSyncedPlayerState.running) return true;
+      if (playerState.facing !== lastSyncedPlayerState.facing) return true;
+      if (playerState.role !== lastSyncedPlayerState.role) return true;
+      if (Math.hypot(playerState.x - lastSyncedPlayerState.x, playerState.y - lastSyncedPlayerState.y) >= playerSyncMinMovement) return true;
+      return Date.now() - lastSyncedPlayerState.seq >= playerIdleSyncIntervalMs;
     }
 
     // ファイル名は手元の画像に合わせて変更してください
