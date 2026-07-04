@@ -233,6 +233,8 @@
     let resultAudioPlayedFor = null;
     let resultIsCurrentPlayerWinner = false;
     let resultExitTimerId = null;
+    let resultRevealTimerId = null;
+    const resultRevealDelayMs = 1600;
     const previousItPlayerIds = new Set();
     const activeExplosionEffects = new Map();
     const explosionDurationMs = 1500;
@@ -392,6 +394,10 @@
       if (resultExitTimerId !== null) {
         window.clearTimeout(resultExitTimerId);
         resultExitTimerId = null;
+      }
+      if (resultRevealTimerId !== null) {
+        window.clearTimeout(resultRevealTimerId);
+        resultRevealTimerId = null;
       }
     }
 
@@ -1064,15 +1070,21 @@
       resetMovementInput();
       stopResultSounds();
       playSound(endGameSound);
-      waitForSoundToFinish(endGameSound, () => {
-        window.setTimeout(() => {
-          if (pendingWinner !== winner || roundWinner) return;
-          announceRoundWinner(winner);
-        }, 2000);
-      });
+      if (resultRevealTimerId !== null) {
+        window.clearTimeout(resultRevealTimerId);
+      }
+      resultRevealTimerId = window.setTimeout(() => {
+        resultRevealTimerId = null;
+        if (pendingWinner !== winner || roundWinner) return;
+        announceRoundWinner(winner);
+      }, resultRevealDelayMs);
     }
 
     function announceRoundWinner(winner) {
+      if (resultRevealTimerId !== null) {
+        window.clearTimeout(resultRevealTimerId);
+        resultRevealTimerId = null;
+      }
       roundWinner = winner;
       announcedWinner = winner;
       resultStartedAt = performance.now();
